@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var editorRoute: StageEditorRoute?
     @State private var isShowingSettings = false
     @State private var playingStageID: UUID?
+    @State private var sharingStage: ShareRoute?
+    @State private var receiveRoute: ReceiveRoute?
 
     var body: some View {
         ZStack {
@@ -38,8 +40,23 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
         }
+        .sheet(item: $sharingStage) { route in
+            StageShareView(library: library, stageID: route.id)
+        }
+        .sheet(item: $receiveRoute) { route in
+            StageReceiveView(library: library, initialCode: route.code)
+        }
+        .onOpenURL { url in
+            // 友達から届いた共有リンク（kuttuke://stage/コード）で開かれたら受け取り画面を出す
+            guard let code = StageShareCode.code(from: url) else { return }
+            editorRoute = nil
+            sharingStage = nil
+            isShowingSettings = false
+            withAnimation { playingStageID = nil }
+            receiveRoute = ReceiveRoute(code: code)
+        }
         .alert("操作できませんでした", isPresented: Binding(
-            get: { editorRoute == nil && library.errorMessage != nil },
+            get: { editorRoute == nil && sharingStage == nil && receiveRoute == nil && library.errorMessage != nil },
             set: { if !$0 { library.errorMessage = nil } }
         )) {
             Button("OK", role: .cancel) { library.errorMessage = nil }
@@ -188,6 +205,18 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button {
+                    receiveRoute = ReceiveRoute(code: nil)
+                } label: {
+                    Label("受け取る", systemImage: "tray.and.arrow.down.fill")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundStyle(KuttukeTheme.ink)
+                        .padding(.horizontal, 14)
+                        .frame(height: 38)
+                        .background(.white, in: Capsule())
+                        .overlay(Capsule().stroke(.black.opacity(0.06)))
+                }
+                .buttonStyle(BouncyButtonStyle())
+                Button {
                     editorRoute = StageEditorRoute(stage: nil)
                 } label: {
                     Label("作る", systemImage: "plus")
@@ -254,6 +283,22 @@ struct ContentView: View {
 
                 Spacer()
 
+                if isPlayable {
+                    Button {
+                        sharingStage = ShareRoute(id: stage.id)
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(KuttukeTheme.secondaryText)
+                            .frame(width: 38, height: 38)
+                            .background(.black.opacity(0.045), in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("「\(stage.name)」を友達に共有")
+                }
+
                 Button {
                     editorRoute = StageEditorRoute(stage: stage)
                 } label: {
@@ -318,6 +363,16 @@ private struct StageEditorRoute: Identifiable {
     let id = UUID()
     // 開いた時点のステージを保持し、削除後に閉じるアニメーション中も編集画面のまま表示する
     let stage: GameStage?
+}
+
+private struct ShareRoute: Identifiable {
+    let id: UUID
+}
+
+private struct ReceiveRoute: Identifiable {
+    let id = UUID()
+    /// 共有リンクから開いたときのコード。手入力ならnil
+    let code: String?
 }
 
 struct BouncyButtonStyle: ButtonStyle {

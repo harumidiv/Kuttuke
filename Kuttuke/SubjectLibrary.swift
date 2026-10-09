@@ -25,6 +25,15 @@ struct GameStage: Identifiable, Codable, Hashable {
     var updatedAt: Date
     /// 素材ごとの進化音（その素材に進化したときに鳴らす音声ファイル名）。未設定の素材は無音
     var mergeSoundFileNames: [UUID: String]?
+    /// 友達に共有したときのコード（CloudKitのレコード名）。未共有ならnil
+    var shareCode: String?
+    var sharedAt: Date?
+
+    /// 共有後にステージを編集していて、アップロードし直す必要があるか
+    var needsShareUpload: Bool {
+        guard shareCode != nil, let sharedAt else { return true }
+        return updatedAt > sharedAt
+    }
 }
 
 /// ステージ保存時の進化音の扱い
@@ -78,6 +87,12 @@ final class SubjectLibrary: ObservableObject {
         stage.assetIDs
             .filter { asset(withID: $0) != nil }
             .map { mergeSoundURL(for: stage, assetID: $0) }
+    }
+
+    /// `images(for:)` と同じ並びの画像ファイル
+    func imageFileURLs(for stage: GameStage) -> [URL] {
+        stage.assetIDs.compactMap { asset(withID: $0) }
+            .map { assetsDirectory.appendingPathComponent($0.fileName) }
     }
 
     func isPlayable(_ stage: GameStage) -> Bool {
@@ -196,7 +211,58 @@ final class SubjectLibrary: ObservableObject {
             return false
         }
         stage.mergeSoundFileNames?.values.forEach(removeMergeSoundFile)
+        // 共有中のステージは公開をやめる（受け取り済みの友達の手元には残る）
+        if let code = stage.shareCode {
+            Task { try? await StageShareService.shared.delete(code: code) }
+        }
         return true
+    }
+
+    func markShared(stageID: UUID, code: String, at date: Date) {
+        guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
+        stages[index].shareCode = code
+        stages[index].sharedAt = date
+        saveStages()
+    }
+
+    func clearShare(stageID: UUID) {
+        guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
+        stages[index].shareCode = nil
+        stages[index].sharedAt = nil
+        saveStages()
+    }
+
+    /// 友達から受け取ったステージを、素材と進化音ごとライブラリに追加する
+    @discardableResult
+    func addReceivedStage(_ received: ReceivedStage) -> UUID? {
+        var newAssets: [SubjectAsset] = []
+        do {
+            try fileManager.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
+            for (data, image) in zip(received.imageData, received.images) {
+                let id = UUID()
+                let fileName = "\(id.uuidString).png"
+                try data.write(to: assetsDirectory.appendingPathComponent(fileName), options: .atomic)
+                newAssets.append(SubjectAsset(id: id, fileName: fileName, image: image))
+            }
+        } catch {
+            newAssets.forEach { try? fileManager.removeItem(at: assetsDirectory.appendingPathComponent($0.fileName)) }
+            errorMessage = "ステージを追加できませんでした。"
+            return nil
+        }
+
+        assets.append(contentsOf: newAssets)
+        var soundChanges: [UUID: MergeSoundChange] = [:]
+        for (asset, soundURL) in zip(newAssets, received.soundURLs) {
+            if let soundURL { soundChanges[asset.id] = .replace(soundURL) }
+        }
+        guard let stageID = saveStage(id: nil, name: received.name, assetIDs: newAssets.map(\.id), soundChanges: soundChanges) else {
+            let newIDs = Set(newAssets.map(\.id))
+            assets.removeAll { newIDs.contains($0.id) }
+            newAssets.forEach { try? fileManager.removeItem(at: assetsDirectory.appendingPathComponent($0.fileName)) }
+            return nil
+        }
+        UserDefaults.standard.set(assets.map(\.fileName), forKey: assetOrderKey)
+        return stageID
     }
 
     private func storeMergeSound(from temporaryURL: URL) -> String? {
