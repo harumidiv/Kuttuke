@@ -329,7 +329,15 @@ struct SubjectLiftEditorView: View {
 
 struct LiftablePhotoView: UIViewRepresentable {
     let image: UIImage
+    // ページ送り中の画面外の写真には切り抜き操作を付けない
+    var isActive: Bool = true
     let onStatusChange: (LiftAnalysisStatus) -> Void
+
+    init(image: UIImage, isActive: Bool = true, onStatusChange: @escaping (LiftAnalysisStatus) -> Void) {
+        self.image = image
+        self.isActive = isActive
+        self.onStatusChange = onStatusChange
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onStatusChange: onStatusChange)
@@ -345,13 +353,14 @@ struct LiftablePhotoView: UIViewRepresentable {
         imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         imageView.image = image
-        imageView.addInteraction(context.coordinator.interaction)
+        context.coordinator.setActive(isActive, on: imageView)
         context.coordinator.analyze(image)
         return imageView
     }
 
     func updateUIView(_ imageView: LiftImageView, context: Context) {
         context.coordinator.onStatusChange = onStatusChange
+        context.coordinator.setActive(isActive, on: imageView)
         guard imageView.image !== image else { return }
         imageView.image = image
         context.coordinator.analyze(image)
@@ -371,6 +380,16 @@ struct LiftablePhotoView: UIViewRepresentable {
         init(onStatusChange: @escaping (LiftAnalysisStatus) -> Void) {
             self.onStatusChange = onStatusChange
             interaction.preferredInteractionTypes = [.imageSubject]
+        }
+
+        func setActive(_ isActive: Bool, on imageView: UIImageView) {
+            let isAttached = interaction.view === imageView
+            if isActive, !isAttached {
+                imageView.addInteraction(interaction)
+                interaction.setContentsRectNeedsUpdate()
+            } else if !isActive, isAttached {
+                imageView.removeInteraction(interaction)
+            }
         }
 
         func analyze(_ image: UIImage) {

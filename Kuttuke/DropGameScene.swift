@@ -2,7 +2,14 @@ import SpriteKit
 import UIKit
 
 final class DropGameScene: SKScene, SKPhysicsContactDelegate {
-    static let maximumLevel = 10
+    /// レベルごとの大きさ（盤面幅に対する基準サイズの倍率）。最大11個分
+    private static let growth: [CGFloat] = [1.0, 1.18, 1.39, 1.64, 1.94, 2.29, 2.70, 3.19, 3.76, 4.44, 5.24]
+    private static let baseSideRatio: CGFloat = 0.105
+    /// 盤面の縦横比（幅:高さ = 3:5）。どの端末でも同じ比率にして有利不利をなくす
+    static let boardAspectRatio: CGFloat = 3.0 / 5.0
+    /// 調整の基準にした盤面の幅（iPhoneでの実寸）。これを1倍として各サイズを拡大縮小する
+    private static let referenceBoardWidth: CGFloat = 311
+    private static let referenceGravity: CGFloat = -7.7
 
     var onScore: ((Int) -> Void)?
     var onNextLevels: (([Int]) -> Void)?
@@ -10,6 +17,9 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     var onMerge: (() -> Void)?
 
     private let textures: [SKTexture]
+    // 当たり判定用の低解像度テクスチャ。輪郭の頂点数を減らし、アイテムが増えても衝突計算を軽くする
+    private let physicsTextures: [SKTexture]
+    private static let physicsTexturePixelSize: CGFloat = 64
     private let itemCategory: UInt32 = 1 << 0
     private let wallCategory: UInt32 = 1 << 1
     private var currentNode: SKSpriteNode?
@@ -20,6 +30,8 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     private var overflowStartedAt: TimeInterval?
     private var sceneTime: TimeInterval = 0
     private var didBuildBoard = false
+    // テクスチャからの当たり判定生成は重いため、レベルごとに一度だけ作ってコピーして使う
+    private var physicsBodyTemplates: [Int: (side: CGFloat, body: SKPhysicsBody)] = [:]
 
     private let itemName = "drop-item"
     private let previewName = "preview-item"
@@ -32,10 +44,11 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
             texture.filteringMode = .linear
             return texture
         }
+        physicsTextures = images.map { SKTexture(image: Self.downscaled($0, to: Self.physicsTexturePixelSize)) }
         super.init(size: CGSize(width: 390, height: 650))
         scaleMode = .resizeFill
         backgroundColor = KuttukeTheme.uiCream
-        physicsWorld.gravity = CGVector(dx: 0, dy: -7.7)
+        physicsWorld.gravity = CGVector(dx: 0, dy: Self.referenceGravity * boardScale)
         physicsWorld.contactDelegate = self
     }
 
@@ -48,12 +61,19 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         view.isMultipleTouchEnabled = false
         view.backgroundColor = .clear
         buildBoard()
+        warmUpPhysicsBodies()
+        warmUpScoreLabelFont()
         prepareNextRound()
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
+        // 盤面が大きいほど重力も強め、落下の見た目の速さを端末によらず揃える
+        physicsWorld.gravity = CGVector(dx: 0, dy: Self.referenceGravity * boardScale)
         guard didBuildBoard else { return }
         rebuildBoardGeometry()
+        if oldSize.width != size.width {
+            warmUpPhysicsBodies()
+        }
         if let currentNode {
             currentNode.position.y = dropHeight
             currentNode.position.x = clampedX(currentNode.position.x, for: currentNode)
@@ -80,7 +100,8 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private var dangerHeight: CGFloat { size.height * 0.79 }
-    private var dropHeight: CGFloat { size.height - 48 }
+    private var dropHeight: CGFloat { size.height - 48 * boardScale }
+    private var boardScale: CGFloat { max(size.width, 1) / Self.referenceBoardWidth }
 
     private func buildBoard() {
         didBuildBoard = true
@@ -161,9 +182,21 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func fillUpcomingLevels(to count: Int) {
+        let maximumSpawnLevel = self.maximumSpawnLevel
         while upcomingLevels.count < count {
-            upcomingLevels.append(Int.random(in: 0...2))
+            upcomingLevels.append(Int.random(in: 0...maximumSpawnLevel))
         }
+    }
+
+    /// 盤面にある最大レベルの2つ下まで出現させる（最低でも下から3番目までは出る）
+    private var maximumSpawnLevel: Int {
+        let minimumSpawnLevel = 2
+        var highestLevelOnBoard = 0
+        enumerateChildNodes(withName: itemName) { [weak self] node, _ in
+            guard let self else { return }
+            highestLevelOnBoard = max(highestLevelOnBoard, self.level(of: node))
+        }
+        return min(max(minimumSpawnLevel, highestLevelOnBoard - 2), highestLevel)
     }
 
     private func makeItem(level: Int, dynamic: Bool) -> SKSpriteNode {
@@ -178,20 +211,46 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         shadow.color = .black
         shadow.colorBlendFactor = 1
         shadow.alpha = 0.13
-        shadow.position = CGPoint(x: 0, y: -4)
+        shadow.position = CGPoint(x: 0, y: -4 * boardScale)
         shadow.zPosition = -1
         node.addChild(shadow)
 
         if dynamic {
-            attachPhysics(to: node, texture: texture)
+            attachPhysics(to: node)
         }
         return node
     }
 
-    private func attachPhysics(to node: SKSpriteNode, texture: SKTexture? = nil) {
-        guard node.physicsBody == nil else { return }
-        let physicsTexture = texture ?? node.texture!
-        let body = SKPhysicsBody(texture: physicsTexture, size: node.size)
+    private func warmUpPhysicsBodies() {
+        guard !textures.isEmpty else { return }
+        for level in 0...highestLevel {
+            _ = physicsBodyTemplate(for: level)
+        }
+    }
+
+    private func physicsBodyTemplate(for level: Int) -> SKPhysicsBody {
+        let side = itemSide(for: level)
+        if let cached = physicsBodyTemplates[level], cached.side == side {
+            return cached.body
+        }
+        let texture = physicsTextures[min(level, physicsTextures.count - 1)]
+        let body = SKPhysicsBody(texture: texture, alphaThreshold: 0.5, size: CGSize(width: side, height: side))
+        physicsBodyTemplates[level] = (side, body)
+        return body
+    }
+
+    private static func downscaled(_ image: UIImage, to pixelSize: CGFloat) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let size = CGSize(width: pixelSize, height: pixelSize)
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func attachPhysics(to node: SKSpriteNode) {
+        guard node.physicsBody == nil,
+              let body = physicsBodyTemplate(for: level(of: node)).copy() as? SKPhysicsBody else { return }
         body.isDynamic = true
         body.affectedByGravity = true
         body.allowsRotation = true
@@ -206,10 +265,16 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         node.physicsBody = body
     }
 
+    /// 最後の素材が進化の終点（これ同士は合体しない）
+    private var highestLevel: Int {
+        max(min(textures.count, Self.growth.count) - 1, 0)
+    }
+
     private func itemSide(for level: Int) -> CGFloat {
-        let base = min(size.width, 430) * 0.09
-        let growth: [CGFloat] = [1.0, 1.18, 1.39, 1.64, 1.94, 2.29, 2.70, 3.19, 3.76, 4.44, 5.24]
-        return base * growth[min(level, growth.count - 1)]
+        // 素材が11個未満のときは大きい方から割り当て、最後の素材が常に最大サイズになるようにする
+        let offset = Self.growth.count - 1 - highestLevel
+        let index = min(max(level, 0) + offset, Self.growth.count - 1)
+        return size.width * Self.baseSideRatio * Self.growth[index]
     }
 
     private func level(of node: SKNode) -> Int {
@@ -275,7 +340,7 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
               first.parent != nil, second.parent != nil else { return }
 
         let firstLevel = level(of: first)
-        guard firstLevel == level(of: second), firstLevel < Self.maximumLevel else { return }
+        guard firstLevel == level(of: second), firstLevel < highestLevel else { return }
         guard first.action(forKey: "merging") == nil,
               second.action(forKey: "merging") == nil else { return }
 
@@ -317,16 +382,27 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         showScoreBurst(earned, at: position)
     }
 
+    /// SKLabelNodeはフォントを初めて描画するときに重い読み込みが走るため、最初の合体前に済ませておく
+    private func warmUpScoreLabelFont() {
+        let label = SKLabelNode(text: "+0123456789")
+        label.fontName = "AvenirNext-Heavy"
+        label.fontSize = 16
+        label.alpha = 0.01
+        label.position = CGPoint(x: -200, y: -200)
+        addChild(label)
+        label.run(.sequence([.wait(forDuration: 0.1), .removeFromParent()]))
+    }
+
     private func showScoreBurst(_ points: Int, at position: CGPoint) {
         let label = SKLabelNode(text: "+\(points)")
         label.fontName = "AvenirNext-Heavy"
-        label.fontSize = 16
+        label.fontSize = 16 * boardScale
         label.fontColor = KuttukeTheme.uiOrange
-        label.position = CGPoint(x: position.x, y: position.y + 12)
+        label.position = CGPoint(x: position.x, y: position.y + 12 * boardScale)
         label.zPosition = 30
         addChild(label)
         label.run(.sequence([
-            .group([.moveBy(x: 0, y: 34, duration: 0.55), .fadeOut(withDuration: 0.55)]),
+            .group([.moveBy(x: 0, y: 34 * boardScale, duration: 0.55), .fadeOut(withDuration: 0.55)]),
             .removeFromParent()
         ]))
     }

@@ -133,12 +133,15 @@ final class SubjectLibrary: ObservableObject {
         return stage.id
     }
 
-    func deleteStage(_ stage: GameStage) {
+    @discardableResult
+    func deleteStage(_ stage: GameStage) -> Bool {
         let previousStages = stages
         stages.removeAll { $0.id == stage.id }
-        if !saveStages() {
+        guard saveStages() else {
             stages = previousStages
+            return false
         }
+        return true
     }
 
     func remove(_ asset: SubjectAsset) {

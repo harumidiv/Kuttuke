@@ -6,7 +6,6 @@ struct ContentView: View {
     @State private var editorRoute: StageEditorRoute?
     @State private var isShowingSettings = false
     @State private var playingStageID: UUID?
-    @State private var stagePendingDeletion: GameStage?
 
     var body: some View {
         ZStack {
@@ -32,30 +31,11 @@ struct ContentView: View {
         .sheet(item: $editorRoute) { route in
             SubjectLibraryView(
                 library: library,
-                stage: route.stageID.flatMap { library.stage(withID: $0) }
+                stage: route.stage
             )
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
-        }
-        .confirmationDialog(
-            "「\(stagePendingDeletion?.name ?? "")」を削除しますか？",
-            isPresented: Binding(
-                get: { stagePendingDeletion != nil },
-                set: { if !$0 { stagePendingDeletion = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("ステージを削除", role: .destructive) {
-                guard let stagePendingDeletion else { return }
-                library.deleteStage(stagePendingDeletion)
-                self.stagePendingDeletion = nil
-            }
-            Button("キャンセル", role: .cancel) {
-                stagePendingDeletion = nil
-            }
-        } message: {
-            Text("保存済みの切り抜き素材は削除されないため、別のステージで引き続き使えます。")
         }
         .alert("操作できませんでした", isPresented: Binding(
             get: { editorRoute == nil && library.errorMessage != nil },
@@ -207,7 +187,7 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button {
-                    editorRoute = StageEditorRoute(stageID: nil)
+                    editorRoute = StageEditorRoute(stage: nil)
                 } label: {
                     Label("作る", systemImage: "plus")
                         .font(.system(size: 13, weight: .black, design: .rounded))
@@ -231,7 +211,7 @@ struct ContentView: View {
 
     private var emptyStageCard: some View {
         Button {
-            editorRoute = StageEditorRoute(stageID: nil)
+            editorRoute = StageEditorRoute(stage: nil)
         } label: {
             VStack(spacing: 12) {
                 Image(systemName: "square.stack.3d.up.badge.automatic")
@@ -273,24 +253,19 @@ struct ContentView: View {
 
                 Spacer()
 
-                Menu {
-                    Button {
-                        editorRoute = StageEditorRoute(stageID: stage.id)
-                    } label: {
-                        Label("編集", systemImage: "pencil")
-                    }
-                    Button(role: .destructive) {
-                        stagePendingDeletion = stage
-                    } label: {
-                        Label("ステージを削除", systemImage: "trash")
-                    }
+                Button {
+                    editorRoute = StageEditorRoute(stage: stage)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(KuttukeTheme.secondaryText)
                         .frame(width: 38, height: 38)
                         .background(.black.opacity(0.045), in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("「\(stage.name)」を編集")
             }
 
             Button {
@@ -340,7 +315,8 @@ struct ContentView: View {
 
 private struct StageEditorRoute: Identifiable {
     let id = UUID()
-    let stageID: UUID?
+    // 開いた時点のステージを保持し、削除後に閉じるアニメーション中も編集画面のまま表示する
+    let stage: GameStage?
 }
 
 struct BouncyButtonStyle: ButtonStyle {

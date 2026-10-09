@@ -14,6 +14,8 @@ final class GameViewModel: ObservableObject {
     @Published var isPaused = false
 
     private let bestScoreKey: String
+    private let mergeFeedback = UIImpactFeedbackGenerator(style: .soft)
+    private let gameOverFeedback = UINotificationFeedbackGenerator()
 
     init(images: [UIImage], stageID: UUID) {
         let bestScoreKey = "kuttuke.best-score.\(stageID.uuidString)"
@@ -25,6 +27,7 @@ final class GameViewModel: ObservableObject {
     }
 
     func restart() {
+        persistBestScore()
         score = 0
         isGameOver = false
         isPaused = false
@@ -45,6 +48,12 @@ final class GameViewModel: ObservableObject {
         scene.endGame()
     }
 
+    /// 合体のたびに書き込むと重いため、ゲームの区切りでだけ保存する
+    func persistBestScore() {
+        guard bestScore > UserDefaults.standard.integer(forKey: bestScoreKey) else { return }
+        UserDefaults.standard.set(bestScore, forKey: bestScoreKey)
+    }
+
     func image(for level: Int) -> UIImage? {
         guard !images.isEmpty else { return nil }
         return images[min(level, images.count - 1)]
@@ -56,19 +65,20 @@ final class GameViewModel: ObservableObject {
             self.score = score
             if score > self.bestScore {
                 self.bestScore = score
-                UserDefaults.standard.set(score, forKey: self.bestScoreKey)
             }
         }
         scene.onNextLevels = { [weak self] levels in self?.nextLevels = levels }
         scene.onGameOver = { [weak self] in
+            self?.persistBestScore()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
                 self?.isGameOver = true
             }
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            self?.gameOverFeedback.notificationOccurred(.warning)
         }
-        scene.onMerge = {
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.9)
+        scene.onMerge = { [weak self] in
+            self?.mergeFeedback.impactOccurred(intensity: 0.9)
         }
+        mergeFeedback.prepare()
     }
 }
 
@@ -95,8 +105,7 @@ struct GameView: View {
             VStack(spacing: 12) {
                 gameHeader
                 scoreBar
-                evolutionBar
-                board
+                boardArea
                 instruction
             }
             .padding(.horizontal, 15)
@@ -106,6 +115,7 @@ struct GameView: View {
             if model.isPaused { pauseOverlay }
             if model.isGameOver { gameOverOverlay }
         }
+        .onDisappear { model.persistBestScore() }
     }
 
     private var gameHeader: some View {
@@ -187,23 +197,25 @@ struct GameView: View {
         .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private var evolutionBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("進化の順番")
+    /// 進化の順番を盤面の右に縦に並べる（下が最小、上へ向かって成長）
+    private var evolutionColumn: some View {
+        let columnWidth: CGFloat = 44
+        return VStack(spacing: 4) {
+            Text("進化")
                 .font(.system(size: 9, weight: .black, design: .rounded))
                 .foregroundStyle(KuttukeTheme.secondaryText)
 
             GeometryReader { proxy in
-                let itemCount = CGFloat(max(model.images.count, 1))
-                let arrowCount = CGFloat(max(model.images.count - 1, 0))
-                let arrowWidth: CGFloat = 5
+                let count = max(model.images.count, 1)
+                let arrowHeight: CGFloat = 9
                 let spacing: CGFloat = 1
-                let spacingCount = CGFloat(max(model.images.count * 2 - 2, 0))
-                let availableForItems = proxy.size.width - arrowCount * arrowWidth - spacingCount * spacing
-                let itemSide = min(30, max(16, floor(availableForItems / itemCount)))
+                let arrowCount = CGFloat(max(count - 1, 0))
+                let spacingCount = CGFloat(max(count * 2 - 2, 0))
+                let availableForItems = proxy.size.height - arrowCount * arrowHeight - spacingCount * spacing
+                let itemSide = min(columnWidth - 8, max(16, floor(availableForItems / CGFloat(count))))
 
-                HStack(spacing: spacing) {
-                    ForEach(Array(model.images.enumerated()), id: \.offset) { index, image in
+                VStack(spacing: spacing) {
+                    ForEach(Array(model.images.enumerated().reversed()), id: \.offset) { index, image in
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
@@ -212,39 +224,48 @@ struct GameView: View {
                             .background(KuttukeTheme.cream, in: Circle())
                             .accessibilityLabel("進化レベル \(index + 1)")
 
-                        if index < model.images.count - 1 {
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 6, weight: .black))
+                        if index > 0 {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 7, weight: .black))
                                 .foregroundStyle(KuttukeTheme.orange)
-                                .frame(width: arrowWidth)
+                                .frame(height: arrowHeight)
                                 .accessibilityHidden(true)
                         }
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             }
-            .frame(height: 30)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(height: 57)
+        .padding(.vertical, 10)
+        .frame(width: columnWidth)
+        .frame(maxHeight: .infinity)
         .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("進化の順番")
     }
 
-    private var board: some View {
+    /// 盤面を固定の縦横比で収め、進化の列を盤面と同じ高さで右に並べる
+    private var boardArea: some View {
         GeometryReader { proxy in
-            SpriteView(scene: model.scene, options: [.allowsTransparency])
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(.white, lineWidth: 4)
-                )
-                .shadow(color: .black.opacity(0.09), radius: 14, y: 8)
+            let columnWidth: CGFloat = 44
+            let spacing: CGFloat = 8
+            let maxBoardWidth = max(proxy.size.width - columnWidth - spacing, 0)
+            let boardWidth = min(maxBoardWidth, proxy.size.height * DropGameScene.boardAspectRatio)
+            let boardHeight = boardWidth / DropGameScene.boardAspectRatio
+
+            HStack(spacing: spacing) {
+                board
+                    .frame(width: boardWidth, height: boardHeight)
+                evolutionColumn
+                    .frame(height: boardHeight)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .frame(maxHeight: .infinity)
+    }
+
+    // スコア更新のたびにSpriteViewまで再評価されないよう、盤面は別のViewに切り出す
+    private var board: some View {
+        GameBoardView(scene: model.scene)
     }
 
     private var instruction: some View {
@@ -323,5 +344,28 @@ struct GameView: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
             }
             .transition(.opacity.combined(with: .scale(scale: 0.9)))
+    }
+}
+
+private struct GameBoardView: View {
+    let scene: DropGameScene
+
+    var body: some View {
+        GeometryReader { proxy in
+            SpriteView(scene: scene, options: [.allowsTransparency])
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(.white, lineWidth: 4)
+                )
+                // 毎フレーム描き変わるSpriteViewに直接影を付けると合成が重くなるため、背面の図形に付ける
+                .background(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(KuttukeTheme.cream)
+                        .shadow(color: .black.opacity(0.09), radius: 14, y: 8)
+                )
+        }
+        .frame(maxHeight: .infinity)
     }
 }

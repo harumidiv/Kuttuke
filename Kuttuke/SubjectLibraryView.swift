@@ -16,6 +16,7 @@ struct SubjectLibraryView: View {
     @State private var pendingLoadFailureCount = 0
     @State private var assetPendingDeletion: SubjectAsset?
     @State private var dropTargetAssetID: UUID?
+    @State private var isConfirmingStageDeletion = false
 
     init(library: SubjectLibrary, stage: GameStage? = nil) {
         self.library = library
@@ -34,6 +35,9 @@ struct SubjectLibraryView: View {
                         nameCard
                         progression
                         assetLibrary
+                        if stage != nil {
+                            deleteStageButton
+                        }
                     }
                     .padding(20)
                     .padding(.bottom, 30)
@@ -85,6 +89,16 @@ struct SubjectLibraryView: View {
             } message: {
                 Text("この素材を使用している他の進化セットからも外れます。")
             }
+            .confirmationDialog(
+                "「\(stage?.name ?? "")」を削除しますか？",
+                isPresented: $isConfirmingStageDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("ステージを削除", role: .destructive) { deleteStage() }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("保存済みの切り抜き素材は削除されないため、別のステージで引き続き使えます。")
+            }
         }
         .interactiveDismissDisabled(library.isProcessing || isLoadingPhoto)
         .fullScreenCover(item: $photoBatch, onDismiss: handleBatchDismiss) { batch in
@@ -124,7 +138,7 @@ struct SubjectLibraryView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("このセットの進化順")
                         .font(.system(size: 17, weight: .black, design: .rounded))
-                    Text("小さい順に並べ、右のハンドルで並べ替え")
+                    Text("小さい順に並べ、矢印か長押しドラッグで並べ替え")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(KuttukeTheme.secondaryText)
                 }
@@ -148,11 +162,14 @@ struct SubjectLibraryView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 23)
             } else {
-                ForEach(Array(selectedAssetIDs.enumerated()), id: \.element) { index, assetID in
-                    if let asset = library.asset(withID: assetID) {
-                        progressionRow(asset, index: index)
+                VStack(spacing: 0) {
+                    ForEach(Array(selectedAssetIDs.enumerated()), id: \.element) { index, assetID in
+                        if let asset = library.asset(withID: assetID) {
+                            progressionRow(asset, index: index)
+                        }
                     }
                 }
+                .padding(.vertical, -6)
 
                 if selectedAssetIDs.count < SubjectLibrary.minimumPlayableItems {
                     Label(
@@ -188,8 +205,8 @@ struct SubjectLibraryView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("レベル \(index + 1)")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                Text(index == selectedAssetIDs.count - 1 && selectedAssetIDs.count < SubjectLibrary.maximumStageItems
-                     ? "以降はこの素材が大きくなります"
+                Text(index == selectedAssetIDs.count - 1
+                     ? "最終形態（これ以上は進化しません）"
                      : "同じレベル同士で進化")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(KuttukeTheme.secondaryText)
@@ -197,31 +214,38 @@ struct SubjectLibraryView: View {
 
             Spacer(minLength: 4)
 
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(KuttukeTheme.secondaryText)
-                .frame(width: 34, height: 38)
-                .contentShape(Rectangle())
-                .draggable(asset.id.uuidString) {
-                    Image(uiImage: asset.image)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(8)
-                        .frame(width: 72, height: 72)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .shadow(color: .black.opacity(0.15), radius: 8, y: 5)
+            HStack(spacing: 0) {
+                // ドラッグに気づかなくても並べ替えられるよう、1つずつ移動するボタンを置く
+                VStack(spacing: 0) {
+                    moveButton(
+                        systemImage: "chevron.up",
+                        label: "レベル\(index + 1)を1つ上へ",
+                        isEnabled: index > 0
+                    ) {
+                        moveSelection(at: index, by: -1)
+                    }
+                    moveButton(
+                        systemImage: "chevron.down",
+                        label: "レベル\(index + 1)を1つ下へ",
+                        isEnabled: index < selectedAssetIDs.count - 1
+                    ) {
+                        moveSelection(at: index, by: 1)
+                    }
                 }
-                .accessibilityLabel("レベル\(index + 1)をドラッグして並べ替え")
 
-            Button {
-                withAnimation { selectedAssetIDs.removeAll { $0 == asset.id } }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .black))
-                    .frame(width: 31, height: 31)
-                    .background(.black.opacity(0.055), in: Circle())
+                Button {
+                    withAnimation { selectedAssetIDs.removeAll { $0 == asset.id } }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .black))
+                        .frame(width: 31, height: 31)
+                        .background(.black.opacity(0.055), in: Circle())
+                        .frame(width: 40, height: 54)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("レベル\(index + 1)を外す")
             }
-            .buttonStyle(.plain)
         }
         .padding(8)
         .background(
@@ -232,6 +256,22 @@ struct SubjectLibraryView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(dropTargetAssetID == asset.id ? KuttukeTheme.orange : .clear, lineWidth: 2)
         )
+        // セル全体をドラッグ開始領域にする（×ボタンのタップはそのまま効く）
+        .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(Rectangle())
+        .draggable(asset.id.uuidString) {
+            Image(uiImage: asset.image)
+                .resizable()
+                .scaledToFit()
+                .padding(8)
+                .frame(width: 72, height: 72)
+                .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 5)
+        }
+        .accessibilityHint("長押ししてドラッグすると並べ替えできます")
+        // 行間の隙間もドロップ先に含める
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
         .dropDestination(for: String.self) { items, _ in
             guard let rawID = items.first,
                   let movingID = UUID(uuidString: rawID) else { return false }
@@ -240,9 +280,33 @@ struct SubjectLibraryView: View {
             return true
         } isTargeted: { isTargeted in
             withAnimation(.easeInOut(duration: 0.14)) {
-                dropTargetAssetID = isTargeted ? asset.id : nil
+                if isTargeted {
+                    dropTargetAssetID = asset.id
+                } else if dropTargetAssetID == asset.id {
+                    // 隣の行へ移った直後に届く離脱通知で、新しいハイライトを消さない
+                    dropTargetAssetID = nil
+                }
             }
         }
+    }
+
+    private func moveButton(
+        systemImage: String,
+        label: String,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .black))
+                .foregroundStyle(KuttukeTheme.secondaryText)
+                .frame(width: 40, height: 27)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.25)
+        .accessibilityLabel(label)
     }
 
     private var assetLibrary: some View {
@@ -366,6 +430,22 @@ struct SubjectLibraryView: View {
         }
     }
 
+    private var deleteStageButton: some View {
+        Button(role: .destructive) {
+            isConfirmingStageDeletion = true
+        } label: {
+            Label("このステージを削除", systemImage: "trash")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.red)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(.white, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        }
+        .buttonStyle(BouncyButtonStyle())
+        .disabled(library.isProcessing || isLoadingPhoto)
+        .padding(.top, 6)
+    }
+
     private var processingOverlay: some View {
         ZStack {
             Color.black.opacity(0.18).ignoresSafeArea()
@@ -416,6 +496,21 @@ struct SubjectLibraryView: View {
                 toOffset: targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
             )
         }
+    }
+
+    private func moveSelection(at index: Int, by offset: Int) {
+        let destination = index + offset
+        guard selectedAssetIDs.indices.contains(index),
+              selectedAssetIDs.indices.contains(destination) else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+            selectedAssetIDs.swapAt(index, destination)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func deleteStage() {
+        guard let stage, library.deleteStage(stage) else { return }
+        dismiss()
     }
 
     private func saveStage() {
