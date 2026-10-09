@@ -12,22 +12,48 @@ final class GameViewModel: ObservableObject {
     @Published var nextLevels = [0, 0, 0]
     @Published var isGameOver = false
     @Published var isPaused = false
+    /// 操作説明は1つ目を落とすまで表示する
+    @Published private(set) var hasDroppedOnce = false
+    /// ゲームオーバー時点の盤面のスクショ（SNS共有用）
+    @Published private(set) var boardSnapshot: UIImage?
 
     private let bestScoreKey: String
+    /// このゲーム開始時点のベストスコア。終了時にベストを更新したかの判定に使う
+    private var bestScoreAtStart: Int
     private let mergeFeedback = UIImpactFeedbackGenerator(style: .soft)
+    private let mergeSound: MergeSoundPlayer
     private let gameOverFeedback = UINotificationFeedbackGenerator()
 
-    init(images: [UIImage], stageID: UUID) {
+    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?]) {
+        self.mergeSound = MergeSoundPlayer(urls: mergeSoundURLs)
         let bestScoreKey = "kuttuke.best-score.\(stageID.uuidString)"
         self.images = images
         self.bestScoreKey = bestScoreKey
-        self.bestScore = UserDefaults.standard.integer(forKey: bestScoreKey)
+        let savedBestScore = UserDefaults.standard.integer(forKey: bestScoreKey)
+        self.bestScore = savedBestScore
+        self.bestScoreAtStart = savedBestScore
         self.scene = DropGameScene(images: images)
         connectScene()
     }
 
+    var didUpdateBestScore: Bool {
+        score > bestScoreAtStart
+    }
+
+    /// ゲーム終了後の操作の前に、ベストスコアを更新していなければインタースティシャル広告を挟む
+    func afterInterstitialIfNeeded(_ action: @escaping () -> Void) {
+        guard isGameOver, !didUpdateBestScore else {
+            action()
+            return
+        }
+        InterstitialAdManager.shared.show(then: action)
+    }
+
     func restart() {
         persistBestScore()
+        bestScoreAtStart = bestScore
+        boardSnapshot = nil
+        hasDroppedOnce = false
         score = 0
         isGameOver = false
         isPaused = false
@@ -68,15 +94,21 @@ final class GameViewModel: ObservableObject {
             }
         }
         scene.onNextLevels = { [weak self] levels in self?.nextLevels = levels }
+        scene.onDrop = { [weak self] in
+            guard let self, !self.hasDroppedOnce else { return }
+            withAnimation(.easeOut(duration: 0.25)) { self.hasDroppedOnce = true }
+        }
         scene.onGameOver = { [weak self] in
+            self?.boardSnapshot = self?.scene.snapshotImage()
             self?.persistBestScore()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
                 self?.isGameOver = true
             }
             self?.gameOverFeedback.notificationOccurred(.warning)
         }
-        scene.onMerge = { [weak self] in
+        scene.onMerge = { [weak self] level in
             self?.mergeFeedback.impactOccurred(intensity: 0.9)
+            self?.mergeSound.play(level: level)
         }
         mergeFeedback.prepare()
     }
@@ -84,11 +116,19 @@ final class GameViewModel: ObservableObject {
 
 struct GameView: View {
     @StateObject private var model: GameViewModel
+    @State private var shareImage: Image?
+    @Environment(\.displayScale) private var displayScale
     let stageName: String
     let onExit: () -> Void
 
-    init(images: [UIImage], stageID: UUID, stageName: String, onExit: @escaping () -> Void) {
-        _model = StateObject(wrappedValue: GameViewModel(images: images, stageID: stageID))
+    init(
+        images: [UIImage],
+        stageID: UUID,
+        stageName: String,
+        mergeSoundURLs: [URL?] = [],
+        onExit: @escaping () -> Void
+    ) {
+        _model = StateObject(wrappedValue: GameViewModel(images: images, stageID: stageID, mergeSoundURLs: mergeSoundURLs))
         self.stageName = stageName
         self.onExit = onExit
     }
@@ -102,20 +142,28 @@ struct GameView: View {
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 12) {
-                gameHeader
-                scoreBar
-                boardArea
-                instruction
+            VStack(spacing: 0) {
+                VStack(spacing: 12) {
+                    gameHeader
+                    scoreBar
+                    boardArea
+                }
+                .padding(.horizontal, 15)
+                .padding(.top, 8)
+                // 盤面とバナーの間に余白を取り、ドロップ操作での誤タップを防ぐ
+                .padding(.bottom, 24)
+
+                BannerAdView()
+                    .frame(width: BannerAdView.size.width, height: BannerAdView.size.height)
             }
-            .padding(.horizontal, 15)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
 
             if model.isPaused { pauseOverlay }
             if model.isGameOver { gameOverOverlay }
         }
         .onDisappear { model.persistBestScore() }
+        .onChange(of: model.boardSnapshot) { _, snapshot in
+            shareImage = snapshot.flatMap(makeShareImage)
+        }
     }
 
     private var gameHeader: some View {
@@ -263,16 +311,45 @@ struct GameView: View {
         }
     }
 
+    private var shareMessage: String {
+        let headline = model.didUpdateBestScore ? "自己ベスト更新！" : ""
+        return "\(headline)「\(stageName)」で\(model.score)点！ #Kuttuke"
+    }
+
+    /// 盤面のスクショにステージ名とスコアを添えたシェア用画像を作る
+    private func makeShareImage(from boardSnapshot: UIImage) -> Image? {
+        let renderer = ImageRenderer(content: ShareCardView(
+            stageName: stageName,
+            score: model.score,
+            isNewBest: model.didUpdateBestScore,
+            boardImage: boardSnapshot
+        ))
+        renderer.scale = displayScale
+        return renderer.uiImage.map { Image(uiImage: $0) }
+    }
+
     // スコア更新のたびにSpriteViewまで再評価されないよう、盤面は別のViewに切り出す
     private var board: some View {
         GameBoardView(scene: model.scene)
+            .overlay {
+                if !model.hasDroppedOnce {
+                    instruction
+                        .transition(.opacity)
+                }
+            }
     }
 
+    /// 1つ目を落とすまで盤面に重ねて表示する。タップは盤面にそのまま通す
     private var instruction: some View {
         Label("左右に動かして、指を離すと落ちます", systemImage: "hand.draw.fill")
-            .font(.system(size: 12, weight: .bold, design: .rounded))
-            .foregroundStyle(KuttukeTheme.secondaryText)
-            .frame(height: 28)
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .foregroundStyle(KuttukeTheme.ink)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.85), in: Capsule())
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+            .allowsHitTesting(false)
+            .accessibilityAddTraits(.isStaticText)
     }
 
     private var pauseOverlay: some View {
@@ -322,8 +399,24 @@ struct GameView: View {
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(KuttukeTheme.secondaryText)
 
+                    if let shareImage {
+                        ShareLink(
+                            item: shareImage,
+                            message: Text(shareMessage),
+                            preview: SharePreview("Kuttuke のスコア", image: shareImage)
+                        ) {
+                            Label("シェアする", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                                .foregroundStyle(KuttukeTheme.ink)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        }
+                        .buttonStyle(BouncyButtonStyle())
+                    }
+
                     Button {
-                        model.restart()
+                        model.afterInterstitialIfNeeded { model.restart() }
                     } label: {
                         Label("もう一度", systemImage: "arrow.clockwise")
                             .font(.system(size: 16, weight: .black, design: .rounded))
@@ -334,7 +427,9 @@ struct GameView: View {
                     }
                     .buttonStyle(BouncyButtonStyle())
 
-                    Button("ホームへ", action: onExit)
+                    Button("ホームへ") {
+                        model.afterInterstitialIfNeeded(onExit)
+                    }
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(KuttukeTheme.secondaryText)
                         .frame(height: 38)
@@ -367,5 +462,61 @@ private struct GameBoardView: View {
                 )
         }
         .frame(maxHeight: .infinity)
+    }
+}
+
+/// SNS共有用の画像レイアウト
+private struct ShareCardView: View {
+    let stageName: String
+    let score: Int
+    let isNewBest: Bool
+    let boardImage: UIImage
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("KUTTUKE")
+                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .tracking(1.5)
+                Spacer()
+                Text(stageName)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(KuttukeTheme.secondaryText)
+                    .lineLimit(1)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                if isNewBest {
+                    Text("自己ベスト更新！")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(KuttukeTheme.orange, in: Capsule())
+                }
+
+                // 桁数が多くても折り返さず、1行に収まるよう縮小する
+                (Text("\(score)")
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                 + Text(" 点")
+                    .font(.system(size: 18, weight: .black, design: .rounded)))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(uiImage: boardImage)
+                .resizable()
+                .aspectRatio(DropGameScene.boardAspectRatio, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(.white, lineWidth: 4)
+                )
+        }
+        .foregroundStyle(KuttukeTheme.ink)
+        .padding(24)
+        .frame(width: 360)
+        .background(KuttukeTheme.background)
     }
 }

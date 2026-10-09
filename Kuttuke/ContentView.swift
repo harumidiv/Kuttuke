@@ -15,7 +15,8 @@ struct ContentView: View {
                 GameView(
                     images: library.images(for: stage),
                     stageID: stage.id,
-                    stageName: stage.name
+                    stageName: stage.name,
+                    mergeSoundURLs: library.mergeSoundURLs(for: stage)
                 ) {
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
                         playingStageID = nil

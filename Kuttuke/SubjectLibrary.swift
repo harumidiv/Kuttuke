@@ -23,6 +23,16 @@ struct GameStage: Identifiable, Codable, Hashable {
     var assetIDs: [UUID]
     let createdAt: Date
     var updatedAt: Date
+    /// 素材ごとの進化音（その素材に進化したときに鳴らす音声ファイル名）。未設定の素材は無音
+    var mergeSoundFileNames: [UUID: String]?
+}
+
+/// ステージ保存時の進化音の扱い
+enum MergeSoundChange {
+    case keep
+    case remove
+    /// 一時フォルダにある録音・選択済みファイルを本保存する
+    case replace(URL)
 }
 
 @MainActor
@@ -55,6 +65,19 @@ final class SubjectLibrary: ObservableObject {
 
     func images(for stage: GameStage) -> [UIImage] {
         stage.assetIDs.compactMap { asset(withID: $0)?.image }
+    }
+
+    func mergeSoundURL(for stage: GameStage, assetID: UUID) -> URL? {
+        guard let fileName = stage.mergeSoundFileNames?[assetID] else { return nil }
+        let url = soundsDirectory.appendingPathComponent(fileName)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// `images(for:)` と同じ並び（レベル順）の進化音
+    func mergeSoundURLs(for stage: GameStage) -> [URL?] {
+        stage.assetIDs
+            .filter { asset(withID: $0) != nil }
+            .map { mergeSoundURL(for: stage, assetID: $0) }
     }
 
     func isPlayable(_ stage: GameStage) -> Bool {
@@ -95,11 +118,35 @@ final class SubjectLibrary: ObservableObject {
     }
 
     @discardableResult
-    func saveStage(id: UUID?, name: String, assetIDs: [UUID]) -> UUID? {
+    func saveStage(
+        id: UUID?,
+        name: String,
+        assetIDs: [UUID],
+        soundChanges: [UUID: MergeSoundChange] = [:]
+    ) -> UUID? {
         let validIDs = uniqueValidAssetIDs(from: assetIDs)
         guard !validIDs.isEmpty else {
             errorMessage = "ステージには切り抜き素材を1個以上追加してください。"
             return nil
+        }
+
+        let previousSounds = id.flatMap { self.stage(withID: $0) }?.mergeSoundFileNames ?? [:]
+        var sounds: [UUID: String] = [:]
+        var newlyStoredFileNames: [String] = []
+        for assetID in validIDs {
+            switch soundChanges[assetID] ?? .keep {
+            case .keep:
+                sounds[assetID] = previousSounds[assetID]
+            case .remove:
+                break
+            case .replace(let temporaryURL):
+                guard let storedName = storeMergeSound(from: temporaryURL) else {
+                    newlyStoredFileNames.forEach(removeMergeSoundFile)
+                    return nil
+                }
+                newlyStoredFileNames.append(storedName)
+                sounds[assetID] = storedName
+            }
         }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -111,10 +158,15 @@ final class SubjectLibrary: ObservableObject {
             stages[index].name = stageName
             stages[index].assetIDs = validIDs
             stages[index].updatedAt = now
+            stages[index].mergeSoundFileNames = sounds
             guard saveStages() else {
                 stages = previousStages
+                newlyStoredFileNames.forEach(removeMergeSoundFile)
                 return nil
             }
+            // 差し替え・削除・素材を外したことで使われなくなった音声を片付ける
+            let keptFileNames = Set(sounds.values)
+            previousSounds.values.filter { !keptFileNames.contains($0) }.forEach(removeMergeSoundFile)
             return id
         }
 
@@ -123,11 +175,13 @@ final class SubjectLibrary: ObservableObject {
             name: stageName,
             assetIDs: validIDs,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            mergeSoundFileNames: sounds
         )
         stages.insert(stage, at: 0)
         guard saveStages() else {
             stages.removeAll { $0.id == stage.id }
+            newlyStoredFileNames.forEach(removeMergeSoundFile)
             return nil
         }
         return stage.id
@@ -141,7 +195,25 @@ final class SubjectLibrary: ObservableObject {
             stages = previousStages
             return false
         }
+        stage.mergeSoundFileNames?.values.forEach(removeMergeSoundFile)
         return true
+    }
+
+    private func storeMergeSound(from temporaryURL: URL) -> String? {
+        do {
+            try fileManager.createDirectory(at: soundsDirectory, withIntermediateDirectories: true)
+            let ext = temporaryURL.pathExtension.isEmpty ? "m4a" : temporaryURL.pathExtension
+            let fileName = "\(UUID().uuidString).\(ext)"
+            try fileManager.copyItem(at: temporaryURL, to: soundsDirectory.appendingPathComponent(fileName))
+            return fileName
+        } catch {
+            errorMessage = "進化音を保存できませんでした。"
+            return nil
+        }
+    }
+
+    private func removeMergeSoundFile(_ fileName: String) {
+        try? fileManager.removeItem(at: soundsDirectory.appendingPathComponent(fileName))
     }
 
     func remove(_ asset: SubjectAsset) {
@@ -152,6 +224,9 @@ final class SubjectLibrary: ObservableObject {
         let now = Date()
         for index in stages.indices where stages[index].assetIDs.contains(asset.id) {
             stages[index].assetIDs.removeAll { $0 == asset.id }
+            if let soundFileName = stages[index].mergeSoundFileNames?.removeValue(forKey: asset.id) {
+                removeMergeSoundFile(soundFileName)
+            }
             stages[index].updatedAt = now
         }
         saveStages()
@@ -190,6 +265,10 @@ final class SubjectLibrary: ObservableObject {
 
     private var assetsDirectory: URL {
         applicationSupportDirectory.appendingPathComponent("KuttukeSubjects", isDirectory: true)
+    }
+
+    private var soundsDirectory: URL {
+        applicationSupportDirectory.appendingPathComponent("KuttukeSounds", isDirectory: true)
     }
 
     private var stagesURL: URL {

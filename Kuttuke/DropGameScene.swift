@@ -4,7 +4,8 @@ import UIKit
 final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     /// レベルごとの大きさ（盤面幅に対する基準サイズの倍率）。最大11個分
     private static let growth: [CGFloat] = [1.0, 1.18, 1.39, 1.64, 1.94, 2.29, 2.70, 3.19, 3.76, 4.44, 5.24]
-    private static let baseSideRatio: CGFloat = 0.105
+    /// 最大レベルの絵柄（余白7%を除いた部分）が盤面の面積の約1/5になる大きさ
+    private static let baseSideRatio: CGFloat = 0.128
     /// 盤面の縦横比（幅:高さ = 3:5）。どの端末でも同じ比率にして有利不利をなくす
     static let boardAspectRatio: CGFloat = 3.0 / 5.0
     /// 調整の基準にした盤面の幅（iPhoneでの実寸）。これを1倍として各サイズを拡大縮小する
@@ -14,7 +15,9 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     var onScore: ((Int) -> Void)?
     var onNextLevels: (([Int]) -> Void)?
     var onGameOver: (() -> Void)?
-    var onMerge: (() -> Void)?
+    /// 合体で進化したときに、進化先のレベルを渡して呼ぶ
+    var onMerge: ((Int) -> Void)?
+    var onDrop: (() -> Void)?
 
     private let textures: [SKTexture]
     // 当たり判定用の低解像度テクスチャ。輪郭の頂点数を減らし、アイテムが増えても衝突計算を軽くする
@@ -23,11 +26,16 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     private let itemCategory: UInt32 = 1 << 0
     private let wallCategory: UInt32 = 1 << 1
     private var currentNode: SKSpriteNode?
+    private weak var activeTouch: UITouch?
     private var upcomingLevels: [Int] = []
     private var canDrop = true
     private var isGameFinished = false
     private var score = 0
     private var overflowStartedAt: TimeInterval?
+    private var lastOverflowAt: TimeInterval?
+    private static let overflowGracePeriod: TimeInterval = 1.0
+    private static let overflowDurationToLose: TimeInterval = 1.5
+    private static let overflowResetTolerance: TimeInterval = 0.4
     private var sceneTime: TimeInterval = 0
     private var didBuildBoard = false
     // テクスチャからの当たり判定生成は重いため、レベルごとに一度だけ作ってコピーして使う
@@ -75,7 +83,7 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
             warmUpPhysicsBodies()
         }
         if let currentNode {
-            currentNode.position.y = dropHeight
+            currentNode.position.y = dropHeight(for: currentNode)
             currentNode.position.x = clampedX(currentNode.position.x, for: currentNode)
         }
     }
@@ -85,10 +93,13 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         enumerateChildNodes(withName: itemName) { node, _ in node.removeFromParent() }
         currentNode?.removeFromParent()
         currentNode = nil
+        activeTouch = nil
         score = 0
         canDrop = true
         isGameFinished = false
         overflowStartedAt = nil
+        lastOverflowAt = nil
+        setDangerWarning(false)
         sceneTime = 0
         onScore?(0)
         upcomingLevels.removeAll(keepingCapacity: true)
@@ -99,8 +110,18 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         finishGame()
     }
 
+    /// 現在の盤面を画像として書き出す（SNS共有用）
+    func snapshotImage() -> UIImage? {
+        guard let view, let texture = view.texture(from: self) else { return nil }
+        return UIImage(cgImage: texture.cgImage())
+    }
+
     private var dangerHeight: CGFloat { size.height * 0.79 }
-    private var dropHeight: CGFloat { size.height - 48 * boardScale }
+    /// 構えている位置。大きいアイテムでも盤面の上端からはみ出さないよう、サイズに応じて下げる
+    private func dropHeight(for node: SKSpriteNode) -> CGFloat {
+        let topMargin = 6 * boardScale
+        return min(size.height - 48 * boardScale, size.height - node.size.height * 0.5 - topMargin)
+    }
     private var boardScale: CGFloat { max(size.width, 1) / Self.referenceBoardWidth }
 
     private func buildBoard() {
@@ -170,7 +191,7 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
 
         let node = makeItem(level: level, dynamic: false)
         node.name = previewName
-        node.position = CGPoint(x: size.width / 2, y: dropHeight)
+        node.position = CGPoint(x: size.width / 2, y: dropHeight(for: node))
         node.alpha = 0
         node.setScale(0.72)
         addChild(node)
@@ -287,26 +308,29 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard canDrop, let touch = touches.first, let currentNode else { return }
+        guard canDrop, activeTouch == nil, let touch = touches.first, let currentNode else { return }
+        activeTouch = touch
         currentNode.position.x = clampedX(touch.location(in: self).x, for: currentNode)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard canDrop, let touch = touches.first, let currentNode else { return }
-        currentNode.position.x = clampedX(touch.location(in: self).x, for: currentNode)
+        guard canDrop, let activeTouch, touches.contains(activeTouch), let currentNode else { return }
+        currentNode.position.x = clampedX(activeTouch.location(in: self).x, for: currentNode)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // 盤面で触り始めたタッチを離したときだけ落とす（画面遷移などで紛れ込んだタッチでは落とさない）
+        guard let activeTouch, touches.contains(activeTouch) else { return }
+        self.activeTouch = nil
         guard canDrop, !isGameFinished, let currentNode else { return }
-        if let touch = touches.first {
-            currentNode.position.x = clampedX(touch.location(in: self).x, for: currentNode)
-        }
+        currentNode.position.x = clampedX(activeTouch.location(in: self).x, for: currentNode)
         drop(currentNode)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let currentNode else { return }
-        drop(currentNode)
+        // システムのジェスチャーなどで中断された場合は落とさず、構えた状態のまま残す
+        guard let activeTouch, touches.contains(activeTouch) else { return }
+        self.activeTouch = nil
     }
 
     private func drop(_ node: SKSpriteNode) {
@@ -317,9 +341,9 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         node.alpha = 1
         node.name = itemName
         node.userData?["dropTime"] = sceneTime
-        node.userData?["enteredBoard"] = false
         attachPhysics(to: node)
         currentNode = nil
+        onDrop?()
 
         run(.sequence([
             .wait(forDuration: 0.48),
@@ -362,7 +386,6 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         merged.name = itemName
         merged.position = position
         merged.userData?["dropTime"] = sceneTime
-        merged.userData?["enteredBoard"] = position.y < dangerHeight
         merged.alpha = 0
         merged.setScale(0.62)
         merged.physicsBody?.velocity = velocity
@@ -378,7 +401,7 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         let earned = Int(pow(2.0, Double(firstLevel + 1))) * 10
         score += earned
         onScore?(score)
-        onMerge?()
+        onMerge?(firstLevel + 1)
         showScoreBurst(earned, at: position)
     }
 
@@ -407,37 +430,65 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
+    override var isPaused: Bool {
+        didSet {
+            // 一時停止中の経過時間でゲームオーバーにならないよう、再開時にカウントをやり直す
+            guard oldValue, !isPaused else { return }
+            overflowStartedAt = nil
+            lastOverflowAt = nil
+            setDangerWarning(false)
+        }
+    }
+
     override func update(_ currentTime: TimeInterval) {
-        guard !isGameFinished else { return }
         sceneTime = currentTime
+        guard !isGameFinished, !isPaused else { return }
 
         var hasOverflow = false
         enumerateChildNodes(withName: itemName) { [weak self] node, stop in
-            guard let self,
-                  let sprite = node as? SKSpriteNode,
-                  let body = sprite.physicsBody else { return }
-            let visibleTop = sprite.position.y + sprite.size.height * 0.34
-            let enteredBoard = sprite.userData?["enteredBoard"] as? Bool ?? false
-            if !enteredBoard && visibleTop < self.dangerHeight {
-                sprite.userData?["enteredBoard"] = true
-            }
-
-            let dropTime = sprite.userData?["dropTime"] as? TimeInterval ?? currentTime
-            let hasSettledSinceDrop = currentTime - dropTime > 1.4 && abs(body.velocity.dy) < 3
-            if visibleTop > self.dangerHeight && (enteredBoard || hasSettledSinceDrop) {
+            guard let self, let sprite = node as? SKSpriteNode, sprite.physicsBody != nil else { return }
+            // 落下・合体直後はまだ線より上にいて当然なので、少しの間だけ判定から外す
+            let spawnedAt = sprite.userData?["dropTime"] as? TimeInterval ?? currentTime
+            guard currentTime - spawnedAt > Self.overflowGracePeriod else { return }
+            // 切り抜き画像は余白7%で描かれているため、見た目の上端は中心からサイズの約43%
+            let visibleTop = sprite.position.y + sprite.size.height * 0.43
+            if visibleTop > self.dangerHeight {
                 hasOverflow = true
                 stop.pointee = true
             }
         }
 
         if hasOverflow {
-            if let overflowStartedAt {
-                if currentTime - overflowStartedAt > 1.8 { finishGame() }
-            } else {
+            lastOverflowAt = currentTime
+            if overflowStartedAt == nil {
                 overflowStartedAt = currentTime
+                setDangerWarning(true)
             }
-        } else {
+            if let overflowStartedAt, currentTime - overflowStartedAt > Self.overflowDurationToLose {
+                finishGame()
+            }
+        } else if let lastOverflowAt, currentTime - lastOverflowAt > Self.overflowResetTolerance {
+            // 揺れで一瞬線の下に戻っただけではカウントを途切れさせない
             overflowStartedAt = nil
+            self.lastOverflowAt = nil
+            setDangerWarning(false)
+        }
+    }
+
+    private func setDangerWarning(_ isWarning: Bool) {
+        guard let line = childNode(withName: dangerLineName) as? SKShapeNode else { return }
+        line.removeAction(forKey: "warning")
+        if isWarning {
+            line.strokeColor = UIColor.systemRed
+            line.lineWidth = 3
+            line.run(.repeatForever(.sequence([
+                .fadeAlpha(to: 0.35, duration: 0.18),
+                .fadeAlpha(to: 1, duration: 0.18)
+            ])), withKey: "warning")
+        } else {
+            line.strokeColor = KuttukeTheme.uiOrange.withAlphaComponent(0.43)
+            line.lineWidth = 2
+            line.alpha = 1
         }
     }
 

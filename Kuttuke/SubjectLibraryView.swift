@@ -17,12 +17,20 @@ struct SubjectLibraryView: View {
     @State private var assetPendingDeletion: SubjectAsset?
     @State private var dropTargetAssetID: UUID?
     @State private var isConfirmingStageDeletion = false
+    @StateObject private var soundDraft: StageSoundDraft
 
     init(library: SubjectLibrary, stage: GameStage? = nil) {
         self.library = library
         self.stage = stage
         _stageName = State(initialValue: stage?.name ?? "")
         _selectedAssetIDs = State(initialValue: stage?.assetIDs ?? [])
+        var savedSoundURLs: [UUID: URL] = [:]
+        if let stage {
+            for assetID in stage.assetIDs {
+                savedSoundURLs[assetID] = library.mergeSoundURL(for: stage, assetID: assetID)
+            }
+        }
+        _soundDraft = StateObject(wrappedValue: StageSoundDraft(savedURLs: savedSoundURLs))
     }
 
     var body: some View {
@@ -35,6 +43,7 @@ struct SubjectLibraryView: View {
                         nameCard
                         progression
                         assetLibrary
+                        advancedSettings
                         if stage != nil {
                             deleteStageButton
                         }
@@ -58,7 +67,7 @@ struct SubjectLibraryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") { saveStage() }
                         .fontWeight(.bold)
-                        .disabled(selectedAssetIDs.isEmpty || library.isProcessing || isLoadingPhoto)
+                        .disabled(selectedAssetIDs.isEmpty || library.isProcessing || isLoadingPhoto || soundDraft.isRecording)
                 }
             }
             .alert("操作できませんでした", isPresented: Binding(
@@ -101,6 +110,7 @@ struct SubjectLibraryView: View {
             }
         }
         .interactiveDismissDisabled(library.isProcessing || isLoadingPhoto)
+        .onDisappear { soundDraft.discardTemporaryFiles() }
         .fullScreenCover(item: $photoBatch, onDismiss: handleBatchDismiss) { batch in
             SubjectLiftBatchEditorView(
                 images: batch.images,
@@ -430,6 +440,41 @@ struct SubjectLibraryView: View {
         }
     }
 
+    private var advancedSettings: some View {
+        NavigationLink {
+            MergeSoundSettingsView(
+                library: library,
+                assetIDs: selectedAssetIDs,
+                soundDraft: soundDraft
+            )
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(KuttukeTheme.orange)
+                    .frame(width: 34, height: 34)
+                    .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("高度な詳細設定")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                    Text("進化したときの音を素材ごとに設定")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(KuttukeTheme.secondaryText)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(KuttukeTheme.secondaryText)
+            }
+            .foregroundStyle(KuttukeTheme.ink)
+            .padding(18)
+            .background(.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        }
+        .buttonStyle(BouncyButtonStyle())
+        .disabled(selectedAssetIDs.count < 2)
+        .opacity(selectedAssetIDs.count < 2 ? 0.45 : 1)
+    }
+
     private var deleteStageButton: some View {
         Button(role: .destructive) {
             isConfirmingStageDeletion = true
@@ -514,7 +559,12 @@ struct SubjectLibraryView: View {
     }
 
     private func saveStage() {
-        guard library.saveStage(id: stage?.id, name: stageName, assetIDs: selectedAssetIDs) != nil else { return }
+        guard library.saveStage(
+            id: stage?.id,
+            name: stageName,
+            assetIDs: selectedAssetIDs,
+            soundChanges: soundDraft.changes
+        ) != nil else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         dismiss()
     }
