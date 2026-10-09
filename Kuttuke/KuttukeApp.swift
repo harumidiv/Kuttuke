@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct KuttukeApp: App {
+    init() {
+        InterstitialAdManager.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(KuttukeTheme.orange)
         }
     }
 }
