@@ -27,35 +27,50 @@ enum MergeSoundAudioSession {
 /// 合体で進化したとき、進化先のレベルの音を鳴らす。連続で合体しても途切れないよう、レベルごとに複数のプレイヤーを順番に使う
 @MainActor
 final class MergeSoundPlayer {
+    /// 進化音を設定していない素材で鳴らす標準の音
+    static let defaultSoundURL = Bundle.main.url(forResource: "poyon", withExtension: "wav")
+
     private static let poolSize = 3
     private var playersByLevel: [Int: [AVAudioPlayer]] = [:]
+    /// 標準の音のプレイヤー。未設定のレベルすべてで共有する
+    private var defaultPlayers: [AVAudioPlayer] = []
     private var nextIndexByLevel: [Int: Int] = [:]
 
-    /// - Parameter urls: レベル順（進化の順番）の音。nilの素材は無音
+    /// - Parameter urls: レベル順（進化の順番）の音。nilの素材は標準の音を鳴らす
     init(urls: [URL?]) {
         for (level, url) in urls.enumerated() {
             guard let url else { continue }
-            let players = (0..<Self.poolSize).compactMap { _ -> AVAudioPlayer? in
-                let player = try? AVAudioPlayer(contentsOf: url)
-                player?.prepareToPlay()
-                return player
-            }
+            let players = Self.makePlayers(url: url)
             if !players.isEmpty {
                 playersByLevel[level] = players
             }
         }
-        if !playersByLevel.isEmpty {
+        if let defaultSoundURL = Self.defaultSoundURL {
+            defaultPlayers = Self.makePlayers(url: defaultSoundURL)
+        }
+        if !playersByLevel.isEmpty || !defaultPlayers.isEmpty {
             MergeSoundAudioSession.activateForGame()
         }
     }
 
     func play(level: Int) {
-        guard let players = playersByLevel[level] else { return }
-        let index = nextIndexByLevel[level, default: 0]
-        nextIndexByLevel[level] = (index + 1) % players.count
+        // 設定した音が読み込めなかった場合も標準の音を鳴らす
+        let key = playersByLevel[level] == nil ? -1 : level
+        let players = playersByLevel[level] ?? defaultPlayers
+        guard !players.isEmpty else { return }
+        let index = nextIndexByLevel[key, default: 0] % players.count
+        nextIndexByLevel[key] = (index + 1) % players.count
         let player = players[index]
         player.currentTime = 0
         player.play()
+    }
+
+    private static func makePlayers(url: URL) -> [AVAudioPlayer] {
+        (0..<poolSize).compactMap { _ -> AVAudioPlayer? in
+            let player = try? AVAudioPlayer(contentsOf: url)
+            player?.prepareToPlay()
+            return player
+        }
     }
 }
 

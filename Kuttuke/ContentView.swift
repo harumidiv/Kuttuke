@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var playingStageID: UUID?
     @State private var sharingStage: ShareRoute?
     @State private var receiveRoute: ReceiveRoute?
+    @State private var isShowingGameCenterSignInAlert = false
 
     var body: some View {
         ZStack {
@@ -45,6 +46,12 @@ struct ContentView: View {
         }
         .sheet(item: $receiveRoute) { route in
             StageReceiveView(library: library, initialCode: route.code)
+        }
+        .onAppear { GameCenterManager.shared.authenticate() }
+        .alert("Game Centerにサインインしていません", isPresented: $isShowingGameCenterSignInAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("ランキングを見るには、設定アプリの「Game Center」からサインインしてください。")
         }
         .onOpenURL { url in
             // 友達から届いた共有リンク（kuttuke://stage/コード）で開かれたら受け取り画面を出す
@@ -97,6 +104,20 @@ struct ContentView: View {
                     .foregroundStyle(KuttukeTheme.secondaryText)
             }
             Spacer()
+            Button {
+                if !GameCenterManager.shared.showLeaderboard() {
+                    isShowingGameCenterSignInAlert = true
+                }
+            } label: {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 44, height: 44)
+                    .foregroundStyle(KuttukeTheme.ink)
+                    .background(.white.opacity(0.9), in: Circle())
+                    .overlay(Circle().stroke(.black.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("ランキング")
             Button {
                 isShowingSettings = true
             } label: {

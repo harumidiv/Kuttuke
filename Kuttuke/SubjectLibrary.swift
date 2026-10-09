@@ -23,7 +23,7 @@ struct GameStage: Identifiable, Codable, Hashable {
     var assetIDs: [UUID]
     let createdAt: Date
     var updatedAt: Date
-    /// 素材ごとの進化音（その素材に進化したときに鳴らす音声ファイル名）。未設定の素材は無音
+    /// 素材ごとの進化音（その素材に進化したときに鳴らす音声ファイル名）。未設定の素材は標準の音（poyon.wav）を鳴らす
     var mergeSoundFileNames: [UUID: String]?
     /// 友達に共有したときのコード（CloudKitのレコード名）。未共有ならnil
     var shareCode: String?

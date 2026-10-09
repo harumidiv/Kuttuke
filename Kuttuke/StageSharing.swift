@@ -56,7 +56,7 @@ struct ReceivedStage {
     let name: String
     let imageData: [Data]
     let images: [UIImage]
-    /// レベル順の進化音（一時フォルダ）。nilは無音
+    /// レベル順の進化音（一時フォルダ）。nilは未設定
     let soundURLs: [URL?]
 
     var hasSounds: Bool { soundURLs.contains { $0 != nil } }

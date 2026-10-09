@@ -99,12 +99,14 @@ final class GameViewModel: ObservableObject {
             withAnimation(.easeOut(duration: 0.25)) { self.hasDroppedOnce = true }
         }
         scene.onGameOver = { [weak self] in
-            self?.boardSnapshot = self?.scene.snapshotImage()
-            self?.persistBestScore()
+            guard let self else { return }
+            GameCenterManager.shared.submit(score: self.score, itemCount: self.images.count)
+            self.boardSnapshot = self.scene.snapshotImage()
+            self.persistBestScore()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
-                self?.isGameOver = true
+                self.isGameOver = true
             }
-            self?.gameOverFeedback.notificationOccurred(.warning)
+            self.gameOverFeedback.notificationOccurred(.warning)
         }
         scene.onMerge = { [weak self] level in
             self?.mergeFeedback.impactOccurred(intensity: 0.9)
@@ -117,6 +119,7 @@ final class GameViewModel: ObservableObject {
 struct GameView: View {
     @StateObject private var model: GameViewModel
     @State private var shareImage: Image?
+    @State private var isShowingGameCenterSignInAlert = false
     @Environment(\.displayScale) private var displayScale
     let stageName: String
     let onExit: () -> Void
@@ -415,6 +418,22 @@ struct GameView: View {
                         .buttonStyle(BouncyButtonStyle())
                     }
 
+                    if GameCenterManager.rankedItemCounts.contains(model.images.count) {
+                        Button {
+                            if !GameCenterManager.shared.showLeaderboard(itemCount: model.images.count) {
+                                isShowingGameCenterSignInAlert = true
+                            }
+                        } label: {
+                            Label("\(model.images.count)個ランキング", systemImage: "trophy.fill")
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                                .foregroundStyle(KuttukeTheme.ink)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        }
+                        .buttonStyle(BouncyButtonStyle())
+                    }
+
                     Button {
                         model.afterInterstitialIfNeeded { model.restart() }
                     } label: {
@@ -439,6 +458,11 @@ struct GameView: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
             }
             .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            .alert("Game Centerにサインインしていません", isPresented: $isShowingGameCenterSignInAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("ランキングに参加するには、設定アプリの「Game Center」からサインインしてください。")
+            }
     }
 }
 

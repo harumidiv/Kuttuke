@@ -18,7 +18,7 @@ struct MergeSoundSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("進化したときの音")
                             .font(.system(size: 17, weight: .black, design: .rounded))
-                        Text("合体してその素材に進化したときに鳴ります。録音は最大\(Int(StageSoundDraft.maximumRecordingDuration))秒、ファイルは\(Int(StageSoundDraft.maximumFileDuration))秒以内です。編集画面で「保存」すると反映されます。")
+                        Text("合体してその素材に進化したときに鳴ります。録音は最大\(Int(StageSoundDraft.maximumRecordingDuration))秒、ファイルは\(Int(StageSoundDraft.maximumFileDuration))秒以内です。未設定の素材では標準の「ぽよん」が鳴ります。編集画面で「保存」すると反映されます。")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(KuttukeTheme.secondaryText)
                     }
@@ -163,7 +163,7 @@ struct MergeSoundSettingsView: View {
             return String(format: "録音中… %.1f / %.0f秒", soundDraft.recordingElapsed, StageSoundDraft.maximumRecordingDuration)
         }
         if soundDraft.hasUnsavedSound(for: assetID) { return "新しい音（保存すると反映）" }
-        return soundDraft.url(for: assetID) == nil ? "未設定（無音）" : "設定済み"
+        return soundDraft.url(for: assetID) == nil ? "未設定（標準の「ぽよん」が鳴ります）" : "設定済み"
     }
 
     private func toggleRecording(for assetID: UUID) {
