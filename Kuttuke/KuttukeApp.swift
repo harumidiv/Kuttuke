@@ -7,6 +7,11 @@
 
 import SwiftUI
 
+/// App Storeのアプリページ（シェアする文章に添える）
+enum AppStoreLink {
+    static let url = URL(string: "https://apps.apple.com/app/id6820843882")!
+}
+
 @main
 struct KuttukeApp: App {
     init() {

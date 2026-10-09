@@ -332,7 +332,7 @@ struct GameView: View {
     private var shareMessage: String {
         let headline = model.didUpdateBestScore ? "自己ベスト更新！" : ""
         let rankText = model.leaderboardRank.map { "\($0.itemCount)個ランキングで全国\($0.rank)位！" } ?? ""
-        return "\(headline)「\(stageName)」で\(model.score)点！\(rankText) #Kuttuke"
+        return "\(headline)「\(stageName)」で\(model.score)点！\(rankText) #Kuttuke\n\(AppStoreLink.url.absoluteString)"
     }
 
     /// 盤面のスクショにステージ名とスコアを添えたシェア用画像を作る

@@ -226,7 +226,7 @@ struct StageShareView: View {
     }
 
     private func shareMessage(_ stage: GameStage, code: String) -> String {
-        "Kuttukeでわたしのステージ「\(stage.name)」を遊んでみて！\nホームの「受け取る」でコード \(StageShareCode.formatted(code)) を入力するか、このリンクを開いてね\n\(StageShareCode.url(for: code).absoluteString)"
+        "Kuttukeでわたしのステージ「\(stage.name)」を遊んでみて！\nホームの「受け取る」でコード \(StageShareCode.formatted(code)) を入力するか、このリンクを開いてね\n\(StageShareCode.url(for: code).absoluteString)\n\nアプリをまだ持っていない人はこちらから\n\(AppStoreLink.url.absoluteString)"
     }
 
     /// 共有済みで編集もしていなければ、アップロードせずにコードを表示する
