@@ -189,8 +189,9 @@ struct StageShareView: View {
             }
             .buttonStyle(.plain)
             .disabled(isStopping)
-            .confirmationDialog("共有をやめますか？", isPresented: $isConfirmingStop, titleVisibility: .visible) {
+            .alert("共有をやめますか？", isPresented: $isConfirmingStop) {
                 Button("共有をやめる", role: .destructive) { stopSharing(code: code) }
+                Button("キャンセル", role: .cancel) {}
             } message: {
                 Text("このコードでは受け取れなくなります。すでに受け取った友達のステージは消えません。")
             }

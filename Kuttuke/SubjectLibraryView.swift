@@ -78,13 +78,12 @@ struct SubjectLibraryView: View {
             } message: {
                 Text(library.errorMessage ?? "")
             }
-            .confirmationDialog(
+            .alert(
                 "この切り抜きを削除しますか？",
                 isPresented: Binding(
                     get: { assetPendingDeletion != nil },
                     set: { if !$0 { assetPendingDeletion = nil } }
-                ),
-                titleVisibility: .visible
+                )
             ) {
                 Button("素材ライブラリから削除", role: .destructive) {
                     guard let assetPendingDeletion else { return }
@@ -96,12 +95,11 @@ struct SubjectLibraryView: View {
                     assetPendingDeletion = nil
                 }
             } message: {
-                Text("この素材を使用している他の進化セットからも外れます。")
+                Text(assetPendingDeletion.map(library.deletionWarning(for:)) ?? "")
             }
-            .confirmationDialog(
+            .alert(
                 "「\(stage?.name ?? "")」を削除しますか？",
-                isPresented: $isConfirmingStageDeletion,
-                titleVisibility: .visible
+                isPresented: $isConfirmingStageDeletion
             ) {
                 Button("ステージを削除", role: .destructive) { deleteStage() }
                 Button("キャンセル", role: .cancel) {}
@@ -216,7 +214,7 @@ struct SubjectLibraryView: View {
                 Text("レベル \(index + 1)")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                 Text(index == selectedAssetIDs.count - 1
-                     ? "最終形態（これ以上は進化しません）"
+                     ? "最終形態（2つくっつくと消えてボーナス点）"
                      : "同じレベル同士で進化")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(KuttukeTheme.secondaryText)

@@ -18,6 +18,8 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     /// 合体で進化したときに、進化先のレベルを渡して呼ぶ
     var onMerge: ((Int) -> Void)?
     var onDrop: (() -> Void)?
+    /// 最終形態同士がくっついて消えたとき（ボーナス点の演出用）
+    var onFinalVanish: (() -> Void)?
 
     private let textures: [SKTexture]
     // 当たり判定用の低解像度テクスチャ。輪郭の頂点数を減らし、アイテムが増えても衝突計算を軽くする
@@ -364,9 +366,15 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
               first.parent != nil, second.parent != nil else { return }
 
         let firstLevel = level(of: first)
-        guard firstLevel == level(of: second), firstLevel < highestLevel else { return }
+        guard firstLevel == level(of: second) else { return }
         guard first.action(forKey: "merging") == nil,
               second.action(forKey: "merging") == nil else { return }
+
+        // 最終形態同士は進化先がないため、2つとも消してボーナス点にする
+        if firstLevel == highestLevel {
+            vanishFinalItems(first, second)
+            return
+        }
 
         first.run(.wait(forDuration: 10), withKey: "merging")
         second.run(.wait(forDuration: 10), withKey: "merging")
@@ -405,9 +413,75 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         showScoreBurst(earned, at: position)
     }
 
+    private func vanishFinalItems(_ first: SKNode, _ second: SKNode) {
+        let position = CGPoint(
+            x: (first.position.x + second.position.x) / 2,
+            y: (first.position.y + second.position.y) / 2
+        )
+        for node in [first, second] {
+            // 消える演出の間に他の素材とぶつからないよう、物理演算から外して名前も変える
+            node.physicsBody = nil
+            node.name = nil
+            node.run(.group([
+                .move(to: position, duration: 0.18),
+                .sequence([
+                    .scale(to: 1.15, duration: 0.12),
+                    .group([.scale(to: 0.2, duration: 0.22), .fadeOut(withDuration: 0.22)]),
+                    .removeFromParent()
+                ])
+            ]), withKey: "merging")
+        }
+
+        let bonus = Int(pow(2.0, Double(highestLevel + 3))) * 10
+        score += bonus
+        onScore?(score)
+        onMerge?(highestLevel)
+        onFinalVanish?()
+        showSparkles(at: position)
+        showBonusBurst(bonus, at: position)
+    }
+
+    private func showSparkles(at position: CGPoint) {
+        let colors = [KuttukeTheme.uiOrange, UIColor(red: 1, green: 0.8, blue: 0.2, alpha: 1), UIColor(red: 0.94, green: 0.34, blue: 0.48, alpha: 1), .white]
+        for index in 0..<24 {
+            let sparkle = SKShapeNode(circleOfRadius: CGFloat.random(in: 3...6) * boardScale)
+            sparkle.fillColor = colors[index % colors.count]
+            sparkle.strokeColor = .clear
+            sparkle.position = position
+            sparkle.zPosition = 25
+            addChild(sparkle)
+            let angle = CGFloat(index) / 24 * .pi * 2 + .random(in: -0.15...0.15)
+            let distance = CGFloat.random(in: 60...120) * boardScale
+            let duration = TimeInterval.random(in: 0.45...0.7)
+            let move = SKAction.moveBy(x: cos(angle) * distance, y: sin(angle) * distance, duration: duration)
+            move.timingMode = .easeOut
+            sparkle.run(.sequence([
+                .group([move, .fadeOut(withDuration: duration), .scale(to: 0.3, duration: duration)]),
+                .removeFromParent()
+            ]))
+        }
+    }
+
+    private func showBonusBurst(_ points: Int, at position: CGPoint) {
+        let label = SKLabelNode(text: "BONUS +\(points)")
+        label.fontName = "AvenirNext-Heavy"
+        label.fontSize = 26 * boardScale
+        label.fontColor = KuttukeTheme.uiOrange
+        label.position = CGPoint(x: min(max(position.x, 90 * boardScale), size.width - 90 * boardScale), y: position.y)
+        label.zPosition = 30
+        label.setScale(0.4)
+        addChild(label)
+        label.run(.sequence([
+            .scale(to: 1.15, duration: 0.16),
+            .scale(to: 1, duration: 0.1),
+            .group([.moveBy(x: 0, y: 46 * boardScale, duration: 0.9), .sequence([.wait(forDuration: 0.5), .fadeOut(withDuration: 0.4)])]),
+            .removeFromParent()
+        ]))
+    }
+
     /// SKLabelNodeはフォントを初めて描画するときに重い読み込みが走るため、最初の合体前に済ませておく
     private func warmUpScoreLabelFont() {
-        let label = SKLabelNode(text: "+0123456789")
+        let label = SKLabelNode(text: "BONUS +0123456789")
         label.fontName = "AvenirNext-Heavy"
         label.fontSize = 16
         label.alpha = 0.01

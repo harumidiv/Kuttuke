@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var library: SubjectLibrary
 
     var body: some View {
         NavigationStack {
@@ -73,6 +74,35 @@ struct SettingsView: View {
                 .font(.system(size: 12, weight: .black, design: .rounded))
                 .tracking(1.2)
                 .foregroundStyle(KuttukeTheme.secondaryText)
+
+            NavigationLink {
+                AssetManagementView(library: library)
+            } label: {
+                HStack(spacing: 15) {
+                    Image(systemName: "photo.stack.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .background(KuttukeTheme.pink, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("切り抜き素材の管理")
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                        Text("\(library.assets.count)個の素材・不要なものを削除")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(KuttukeTheme.secondaryText)
+                    }
+
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(KuttukeTheme.secondaryText)
+                }
+                .padding(14)
+                .background(.white, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.black.opacity(0.055)))
+            }
+            .buttonStyle(.plain)
 
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "internaldrive.fill")

@@ -16,6 +16,9 @@ final class GameViewModel: ObservableObject {
     @Published private(set) var hasDroppedOnce = false
     /// ゲームオーバー時点の盤面のスクショ（SNS共有用）
     @Published private(set) var boardSnapshot: UIImage?
+    /// Game Centerのランキングに今回のスコアで載ったときの順位
+    @Published private(set) var leaderboardRank: LeaderboardRank?
+    private var rankTask: Task<Void, Never>?
 
     private let bestScoreKey: String
     /// このゲーム開始時点のベストスコア。終了時にベストを更新したかの判定に使う
@@ -53,6 +56,8 @@ final class GameViewModel: ObservableObject {
         persistBestScore()
         bestScoreAtStart = bestScore
         boardSnapshot = nil
+        rankTask?.cancel()
+        leaderboardRank = nil
         hasDroppedOnce = false
         score = 0
         isGameOver = false
@@ -63,7 +68,7 @@ final class GameViewModel: ObservableObject {
 
     func togglePause() {
         guard !isGameOver else { return }
-        isPaused.toggle()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { isPaused.toggle() }
         scene.isPaused = isPaused
     }
 
@@ -100,13 +105,23 @@ final class GameViewModel: ObservableObject {
         }
         scene.onGameOver = { [weak self] in
             guard let self else { return }
-            GameCenterManager.shared.submit(score: self.score, itemCount: self.images.count)
+            let score = self.score
+            let itemCount = self.images.count
+            self.rankTask = Task { [weak self] in
+                guard let rank = await GameCenterManager.shared.submit(score: score, itemCount: itemCount),
+                      !Task.isCancelled, let self, self.isGameOver else { return }
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { self.leaderboardRank = rank }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
             self.boardSnapshot = self.scene.snapshotImage()
             self.persistBestScore()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
                 self.isGameOver = true
             }
             self.gameOverFeedback.notificationOccurred(.warning)
+        }
+        scene.onFinalVanish = { [weak self] in
+            self?.gameOverFeedback.notificationOccurred(.success)
         }
         scene.onMerge = { [weak self] level in
             self?.mergeFeedback.impactOccurred(intensity: 0.9)
@@ -316,7 +331,8 @@ struct GameView: View {
 
     private var shareMessage: String {
         let headline = model.didUpdateBestScore ? "自己ベスト更新！" : ""
-        return "\(headline)「\(stageName)」で\(model.score)点！ #Kuttuke"
+        let rankText = model.leaderboardRank.map { "\($0.itemCount)個ランキングで全国\($0.rank)位！" } ?? ""
+        return "\(headline)「\(stageName)」で\(model.score)点！\(rankText) #Kuttuke"
     }
 
     /// 盤面のスクショにステージ名とスコアを添えたシェア用画像を作る
@@ -355,21 +371,34 @@ struct GameView: View {
             .accessibilityAddTraits(.isStaticText)
     }
 
+    /// 結果画面と同じ大きさ・構成にそろえる
     private var pauseOverlay: some View {
-        Color.black.opacity(0.24)
+        Color.black.opacity(0.32)
             .ignoresSafeArea()
             .overlay {
-                VStack(spacing: 15) {
-                    Image(systemName: "pause.fill")
-                        .font(.system(size: 26, weight: .black))
-                    Text("ひとやすみ")
-                        .font(.system(size: 22, weight: .black, design: .rounded))
-                    Button("つづける") { model.togglePause() }
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 28)
-                        .frame(height: 48)
-                        .background(KuttukeTheme.ink, in: Capsule())
+                VStack(spacing: 12) {
+                    Label("ひとやすみ", systemImage: "pause.fill")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .tracking(2)
+                        .foregroundStyle(KuttukeTheme.orange)
+                    Text("\(model.score)")
+                        .font(.system(size: 54, weight: .black, design: .rounded))
+                    Text("いまのスコア")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(KuttukeTheme.secondaryText)
+
+                    Button {
+                        model.togglePause()
+                    } label: {
+                        Label("つづける", systemImage: "play.fill")
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(KuttukeTheme.ink, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    }
+                    .buttonStyle(BouncyButtonStyle())
+                    .padding(.top, 6)
 
                     Button {
                         model.finishCurrentGame()
@@ -377,14 +406,17 @@ struct GameView: View {
                         Label("ここで終了", systemImage: "stop.fill")
                             .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(.red)
-                            .padding(.horizontal, 22)
-                            .frame(height: 42)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(28)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .padding(26)
+                .frame(maxWidth: 310)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
             }
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
     }
 
     private var gameOverOverlay: some View {
@@ -392,6 +424,10 @@ struct GameView: View {
             .ignoresSafeArea()
             .overlay {
                 VStack(spacing: 12) {
+                    if let rank = model.leaderboardRank {
+                        RankInBanner(rank: rank)
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    }
                     Text("FINISH!")
                         .font(.system(size: 12, weight: .black, design: .rounded))
                         .tracking(2)
@@ -456,6 +492,14 @@ struct GameView: View {
                 .padding(26)
                 .frame(maxWidth: 310)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+            }
+            // 紙吹雪は結果カードより手前に降らせる
+            .overlay {
+                if model.leaderboardRank != nil {
+                    ConfettiView()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
             }
             .transition(.opacity.combined(with: .scale(scale: 0.9)))
             .alert("Game Centerにサインインしていません", isPresented: $isShowingGameCenterSignInAlert) {
@@ -542,5 +586,120 @@ private struct ShareCardView: View {
         .padding(24)
         .frame(width: 360)
         .background(KuttukeTheme.background)
+    }
+}
+
+/// ランキングに載ったことを知らせる、結果画面の上部の帯
+private struct RankInBanner: View {
+    let rank: LeaderboardRank
+    @State private var isShining = false
+
+    private var medalColor: Color {
+        switch rank.rank {
+        case 1: Color(red: 1.0, green: 0.78, blue: 0.18)
+        case 2: Color(red: 0.72, green: 0.76, blue: 0.82)
+        case 3: Color(red: 0.84, green: 0.55, blue: 0.32)
+        default: KuttukeTheme.orange
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: rank.rank <= 3 ? "crown.fill" : "trophy.fill")
+                    .symbolEffect(.bounce, options: .repeat(2), value: isShining)
+                Text("ランクイン！")
+            }
+            .font(.system(size: 13, weight: .black, design: .rounded))
+            .foregroundStyle(.white)
+
+            Text("全国 \(Text("\(rank.rank)").font(.system(size: 30, weight: .black, design: .rounded))) 位")
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+
+            Text("\(rank.itemCount)個ランキング・\(rank.totalPlayers)人中")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(
+            LinearGradient(
+                colors: [medalColor, KuttukeTheme.pink],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .overlay {
+            // 帯の上を光が横切る
+            LinearGradient(colors: [.clear, .white.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 70)
+                .rotationEffect(.degrees(20))
+                .offset(x: isShining ? 220 : -220)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: medalColor.opacity(0.45), radius: 12, y: 6)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).delay(0.3)) { isShining = true }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("ランクイン。\(rank.itemCount)個ランキングで全国\(rank.rank)位、\(rank.totalPlayers)人中")
+    }
+}
+
+/// ランクインしたときに画面の上から降らせる紙吹雪
+private struct ConfettiView: View {
+    private struct Piece: Identifiable {
+        let id: Int
+        let x: CGFloat
+        let size: CGSize
+        let color: Color
+        let delay: Double
+        let duration: Double
+        let spin: Double
+        let drift: CGFloat
+    }
+
+    @State private var isFalling = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let pieces: [Piece] = {
+        let colors: [Color] = [KuttukeTheme.orange, KuttukeTheme.pink, KuttukeTheme.purple, KuttukeTheme.mint, KuttukeTheme.sky, Color(red: 1, green: 0.8, blue: 0.2)]
+        return (0..<70).map { index in
+            Piece(
+                id: index,
+                x: .random(in: 0...1),
+                size: CGSize(width: .random(in: 6...11), height: .random(in: 10...16)),
+                color: colors[index % colors.count],
+                delay: .random(in: 0...0.9),
+                duration: .random(in: 2.2...3.6),
+                spin: .random(in: 360...900) * (Bool.random() ? 1 : -1),
+                drift: .random(in: -40...40)
+            )
+        }
+    }()
+
+    var body: some View {
+        GeometryReader { proxy in
+            ForEach(pieces) { piece in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(piece.color)
+                    .frame(width: piece.size.width, height: piece.size.height)
+                    .rotation3DEffect(.degrees(isFalling ? piece.spin : 0), axis: (x: 1, y: 0.4, z: 0.2))
+                    .position(
+                        x: piece.x * proxy.size.width + (isFalling ? piece.drift : 0),
+                        y: isFalling ? proxy.size.height + 40 : -30
+                    )
+                    .opacity(isFalling ? 0.85 : 1)
+                    .animation(.easeIn(duration: piece.duration).delay(piece.delay), value: isFalling)
+            }
+        }
+        .opacity(reduceMotion ? 0 : 1)
+        .onAppear { isFalling = true }
     }
 }

@@ -95,6 +95,27 @@ final class SubjectLibrary: ObservableObject {
             .map { assetsDirectory.appendingPathComponent($0.fileName) }
     }
 
+    /// その素材を使っているステージ
+    func stages(using assetID: UUID) -> [GameStage] {
+        stages.filter { $0.assetIDs.contains(assetID) }
+    }
+
+    /// 素材を削除するときに、影響を受けるステージを伝える文章
+    func deletionWarning(for asset: SubjectAsset) -> String {
+        let usingStages = stages(using: asset.id)
+        guard !usingStages.isEmpty else {
+            return "どのステージにも使われていません。削除すると元に戻せません。"
+        }
+        let names = usingStages.map { "「\($0.name)」" }.joined()
+        var message = "\(names)で使われています。削除するとこれらのステージから外れ、設定した進化音も消えます。"
+        let unplayable = usingStages.filter { isPlayable($0) && images(for: $0).count - 1 < Self.minimumPlayableItems }
+        if !unplayable.isEmpty {
+            let unplayableNames = unplayable.map { "「\($0.name)」" }.joined()
+            message += "\n\(unplayableNames)は素材が\(Self.minimumPlayableItems)個未満になり、遊べなくなります。"
+        }
+        return message
+    }
+
     func isPlayable(_ stage: GameStage) -> Bool {
         images(for: stage).count >= Self.minimumPlayableItems
     }

@@ -39,7 +39,7 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $isShowingSettings) {
-            SettingsView()
+            SettingsView(library: library)
         }
         .sheet(item: $sharingStage) { route in
             StageShareView(library: library, stageID: route.id)
@@ -83,7 +83,6 @@ struct ContentView: View {
         ScrollView {
             VStack(spacing: 24) {
                 header
-                hero
                 stagesSection
             }
             .padding(.horizontal, 20)
@@ -131,86 +130,6 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("設定")
         }
-    }
-
-    private var hero: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 36, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [KuttukeTheme.mint, KuttukeTheme.sky],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            Circle()
-                .fill(.white.opacity(0.36))
-                .frame(width: 210)
-                .offset(x: 125, y: -76)
-
-            VStack(spacing: 8) {
-                ZStack(alignment: .bottom) {
-                    ForEach(Array(heroImages.enumerated()), id: \.offset) { index, image in
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: CGFloat(76 + index * 27), height: CGFloat(76 + index * 27))
-                            .rotationEffect(.degrees(Double(index - 1) * 7))
-                            .offset(x: CGFloat(index - 1) * 62, y: CGFloat((2 - index) * 11))
-                            .shadow(color: .black.opacity(0.13), radius: 9, y: 7)
-                    }
-
-                    if heroImages.isEmpty {
-                        starterGraphic
-                    }
-                }
-                .frame(height: 166)
-
-                Text(library.stages.isEmpty ? "お気に入りの進化セットを作ろう" : "\(library.stages.count)個のステージを保存中")
-                    .font(.system(size: 23, weight: .black, design: .rounded))
-                    .foregroundStyle(KuttukeTheme.ink)
-                Text(library.stages.isEmpty ? "一度切り抜けば、何度でも素材に使えます" : "好きなステージを選んですぐ遊べます")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(KuttukeTheme.ink.opacity(0.62))
-            }
-            .padding(.vertical, 21)
-            .padding(.horizontal, 14)
-        }
-        .frame(height: 286)
-        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 36, style: .continuous)
-                .stroke(.white.opacity(0.65), lineWidth: 1)
-        )
-    }
-
-    private var starterGraphic: some View {
-        ZStack {
-            ForEach(0..<3) { index in
-                Circle()
-                    .fill([KuttukeTheme.orange, KuttukeTheme.pink, KuttukeTheme.purple][index])
-                    .frame(width: CGFloat(75 + index * 25))
-                    .overlay {
-                        Image(systemName: index == 2 ? "photo.on.rectangle.angled" : "sparkle")
-                            .font(.system(size: CGFloat(20 + index * 4), weight: .bold))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-                    .offset(x: CGFloat(index - 1) * 60, y: CGFloat((2 - index) * 12))
-                    .shadow(color: .black.opacity(0.12), radius: 9, y: 7)
-            }
-        }
-    }
-
-    private var heroImages: [UIImage] {
-        guard let stage = library.stages.first else { return [] }
-        let images = library.images(for: stage)
-        guard !images.isEmpty else { return [] }
-        var result = Array(images.prefix(3))
-        while result.count < 3, let last = result.last {
-            result.append(last)
-        }
-        return result
     }
 
     private var stagesSection: some View {
