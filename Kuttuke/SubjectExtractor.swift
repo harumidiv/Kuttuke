@@ -40,6 +40,16 @@ enum SubjectExtractor {
         return result
     }
 
+    /// 切り抜き画像のまわりの透明な余白を除く。素材の下端を揃えて並べたいときに使う
+    nonisolated static func trimmedToContent(_ image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage,
+              let bounds = alphaBounds(in: cgImage),
+              let cropped = cgImage.cropping(to: bounds) else {
+            return image
+        }
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
+    }
+
     nonisolated private static func normalizeToSquare(_ image: UIImage) throws -> UIImage {
         guard let cgImage = image.cgImage,
               let bounds = alphaBounds(in: cgImage),

@@ -7,6 +7,8 @@ import UIKit
 final class GameViewModel: ObservableObject {
     let scene: DropGameScene
     let images: [UIImage]
+    /// 進化の列に並べる、透明な余白を除いた素材
+    let evolutionImages: [UIImage]
     @Published var score = 0
     @Published var bestScore: Int
     @Published var nextLevels = [0, 0, 0]
@@ -31,6 +33,7 @@ final class GameViewModel: ObservableObject {
         self.mergeSound = MergeSoundPlayer(urls: mergeSoundURLs)
         let bestScoreKey = "kuttuke.best-score.\(stageID.uuidString)"
         self.images = images
+        self.evolutionImages = images.map(SubjectExtractor.trimmedToContent)
         self.bestScoreKey = bestScoreKey
         let savedBestScore = UserDefaults.standard.integer(forKey: bestScoreKey)
         self.bestScore = savedBestScore
@@ -263,67 +266,58 @@ struct GameView: View {
         .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    /// 進化の順番を盤面の右に縦に並べる（下が最小、上へ向かって成長）
-    private var evolutionColumn: some View {
-        let columnWidth: CGFloat = 44
-        return VStack(spacing: 4) {
-            Text("進化")
-                .font(.system(size: 9, weight: .black, design: .rounded))
-                .foregroundStyle(KuttukeTheme.secondaryText)
+    /// 進化列の高さ（最大レベルの素材の大きさ + 上下の余白）
+    private static let evolutionRowHeight: CGFloat = 50
+    /// 進化列の素材と背景の間の余白
+    private static let evolutionRowInset: CGFloat = 3
 
-            GeometryReader { proxy in
-                let count = max(model.images.count, 1)
-                let arrowHeight: CGFloat = 9
-                let spacing: CGFloat = 1
-                let arrowCount = CGFloat(max(count - 1, 0))
-                let spacingCount = CGFloat(max(count * 2 - 2, 0))
-                let availableForItems = proxy.size.height - arrowCount * arrowHeight - spacingCount * spacing
-                let itemSide = min(columnWidth - 8, max(16, floor(availableForItems / CGFloat(count))))
+    /// 進化の順番を盤面の下に横に並べる（左が最小、右へ向かって大きくなる）
+    private var evolutionRow: some View {
+        GeometryReader { proxy in
+            let inset = Self.evolutionRowInset
+            let layout = EvolutionRowLayout(
+                count: model.evolutionImages.count,
+                maxHeight: proxy.size.height,
+                availableWidth: proxy.size.width,
+                inset: inset
+            )
+            let sides = layout.itemSides
 
-                VStack(spacing: spacing) {
-                    ForEach(Array(model.images.enumerated().reversed()), id: \.offset) { index, image in
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding(3)
-                            .frame(width: itemSide, height: itemSide)
-                            .background(KuttukeTheme.cream, in: Circle())
-                            .accessibilityLabel("進化レベル \(index + 1)")
-
-                        if index > 0 {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 7, weight: .black))
-                                .foregroundStyle(KuttukeTheme.orange)
-                                .frame(height: arrowHeight)
-                                .accessibilityHidden(true)
-                        }
-                    }
+            HStack(alignment: .bottom, spacing: 0) {
+                ForEach(Array(model.evolutionImages.enumerated()), id: \.offset) { index, image in
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        // 余白を除いた素材を枠の下端に置き、すべての素材の底を揃える
+                        .frame(width: sides[index], height: sides[index], alignment: .bottom)
+                        .accessibilityLabel("進化レベル \(index + 1)")
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             }
+            .padding(inset)
+            .background(
+                EvolutionBackdrop(layout: layout)
+                    .fill(.white.opacity(0.9))
+            )
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
-        .padding(.vertical, 10)
-        .frame(width: columnWidth)
-        .frame(maxHeight: .infinity)
-        .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("進化の順番")
     }
 
-    /// 盤面を固定の縦横比で収め、進化の列を盤面と同じ高さで右に並べる
+    /// 盤面を固定の縦横比で収め、進化の列を盤面と同じ幅で下に並べる
     private var boardArea: some View {
         GeometryReader { proxy in
-            let columnWidth: CGFloat = 44
+            let rowHeight = Self.evolutionRowHeight
             let spacing: CGFloat = 8
-            let maxBoardWidth = max(proxy.size.width - columnWidth - spacing, 0)
-            let boardWidth = min(maxBoardWidth, proxy.size.height * DropGameScene.boardAspectRatio)
+            let maxBoardHeight = max(proxy.size.height - rowHeight - spacing, 0)
+            let boardWidth = min(proxy.size.width, maxBoardHeight * DropGameScene.boardAspectRatio)
             let boardHeight = boardWidth / DropGameScene.boardAspectRatio
 
-            HStack(spacing: spacing) {
+            VStack(spacing: spacing) {
                 board
                     .frame(width: boardWidth, height: boardHeight)
-                evolutionColumn
-                    .frame(height: boardHeight)
+                evolutionRow
+                    .frame(width: boardWidth, height: rowHeight)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
@@ -701,5 +695,103 @@ private struct ConfettiView: View {
         }
         .opacity(reduceMotion ? 0 : 1)
         .onAppear { isFalling = true }
+    }
+}
+
+/// 進化の列の並べ方。上辺のカーブを先に決め、各素材をカーブの下に収まる大きさで左から詰めていく
+private struct EvolutionRowLayout {
+    /// 左端の高さを右端の何割にするか
+    static let leftHeightRatio: CGFloat = 0.4
+
+    /// 背景の幅と、右端でのカーブの高さ
+    let width: CGFloat
+    let topHeight: CGFloat
+    let inset: CGFloat
+    let itemSides: [CGFloat]
+
+    init(count: Int, maxHeight: CGFloat, availableWidth: CGFloat, inset: CGFloat) {
+        self.inset = inset
+        let maxHeight = max(maxHeight, 0)
+        let availableWidth = max(availableWidth, 0)
+        guard count > 0, maxHeight > 0, availableWidth > 0 else {
+            (width, topHeight, itemSides) = (0, 0, [])
+            return
+        }
+
+        // 最大の高さで並べて幅が余るなら、ちょうど詰まる幅まで背景を縮める。はみ出すなら高さを縮める
+        var width = availableWidth
+        var topHeight = maxHeight
+        if Self.filledWidth(count: count, width: availableWidth, topHeight: maxHeight, inset: inset) <= availableWidth {
+            var low: CGFloat = 0
+            var high = availableWidth
+            for _ in 0..<30 {
+                let mid = (low + high) / 2
+                if Self.filledWidth(count: count, width: mid, topHeight: maxHeight, inset: inset) > mid { low = mid } else { high = mid }
+            }
+            width = high
+        } else {
+            var low: CGFloat = 0
+            var high = maxHeight
+            for _ in 0..<30 {
+                let mid = (low + high) / 2
+                if Self.filledWidth(count: count, width: availableWidth, topHeight: mid, inset: inset) > availableWidth { high = mid } else { low = mid }
+            }
+            topHeight = low
+        }
+        self.width = width
+        self.topHeight = topHeight
+        self.itemSides = Self.sides(count: count, width: width, topHeight: topHeight, inset: inset)
+    }
+
+    /// 左端からxの位置でのカーブの高さ。右へ行くほど急に高くなる（下にたわむ）
+    static func curveHeight(at x: CGFloat, width: CGFloat, topHeight: CGFloat) -> CGFloat {
+        let progress = min(max(x / max(width, 1), 0), 1)
+        return topHeight * (leftHeightRatio + (1 - leftHeightRatio) * progress * progress)
+    }
+
+    func curveHeight(at x: CGFloat) -> CGFloat {
+        Self.curveHeight(at: x, width: width, topHeight: topHeight)
+    }
+
+    /// 素材の大きさを、その素材の左端からこの割合だけ右の位置でのカーブの高さに合わせる。
+    /// 0なら素材の上端がカーブに一切かからないが、右端の素材の上が空きすぎるため少し右で合わせる
+    private static let fitPosition: CGFloat = 0.35
+
+    private static func sides(count: Int, width: CGFloat, topHeight: CGFloat, inset: CGFloat) -> [CGFloat] {
+        var x = inset
+        return (0..<count).map { _ in
+            // 大きさで合わせる位置が変わるので、数回くり返して落ち着かせる
+            var side = curveHeight(at: x, width: width, topHeight: topHeight) - inset * 2
+            for _ in 0..<6 {
+                side = curveHeight(at: x + side * fitPosition, width: width, topHeight: topHeight) - inset * 2
+            }
+            side = max(floor(side), 1)
+            x += side
+            return side
+        }
+    }
+
+    private static func filledWidth(count: Int, width: CGFloat, topHeight: CGFloat, inset: CGFloat) -> CGFloat {
+        sides(count: count, width: width, topHeight: topHeight, inset: inset).reduce(0, +) + inset * 2
+    }
+}
+
+/// 進化の列の背景。底辺は平らで、上辺は右へ向かって下にたわみながら高くなるカーブ
+private struct EvolutionBackdrop: Shape {
+    var layout: EvolutionRowLayout
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        let step: CGFloat = 2
+        var x: CGFloat = 0
+        while x < rect.width {
+            path.addLine(to: CGPoint(x: rect.minX + x, y: rect.maxY - layout.curveHeight(at: x)))
+            x += step
+        }
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - layout.curveHeight(at: rect.width)))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
