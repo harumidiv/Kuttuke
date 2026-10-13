@@ -111,13 +111,12 @@ struct StageShareView: View {
 
     private func confirmCard(_ stage: GameStage) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("共有のしくみ", systemImage: "person.2.fill")
+            Label("友達にステージを送ろう！", systemImage: "person.2.fill")
                 .font(.system(size: 15, weight: .black, design: .rounded))
-            VStack(alignment: .leading, spacing: 8) {
-                bullet("切り抜き画像と進化音をiCloudにアップロードし、共有コードを発行します。")
-                bullet("友達はKuttukeのホームの「受け取る」からコードを入れるか、送ったリンクを開くと同じステージで遊べます。")
-                bullet("コードを知っている人なら誰でも受け取れます。人に見られて困る写真は含めないでください。")
-            }
+            Text("コードを送ると、友達も同じステージで遊べます。見られて困る写真は使わないでね。")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(KuttukeTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             primaryButton("共有コードを発行", systemImage: "square.and.arrow.up") { upload(stage) }
                 .padding(.top, 4)
         }
@@ -167,7 +166,7 @@ struct StageShareView: View {
             }
             .buttonStyle(BouncyButtonStyle())
 
-            Text("ステージを編集したら、もう一度この画面を開くと同じコードの内容が最新になります。")
+            Text("編集してもコードは同じです。")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(KuttukeTheme.secondaryText)
                 .multilineTextAlignment(.center)
@@ -200,19 +199,6 @@ struct StageShareView: View {
         .background(.white, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
     }
 
-    private func bullet(_ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Circle()
-                .fill(KuttukeTheme.orange)
-                .frame(width: 5, height: 5)
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3 }
-            Text(text)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(KuttukeTheme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     private func primaryButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
@@ -226,7 +212,7 @@ struct StageShareView: View {
     }
 
     private func shareMessage(_ stage: GameStage, code: String) -> String {
-        "Kuttukeでわたしのステージ「\(stage.name)」を遊んでみて！\nホームの「受け取る」でコード \(StageShareCode.formatted(code)) を入力するか、このリンクを開いてね\n\(StageShareCode.url(for: code).absoluteString)\n\nアプリをまだ持っていない人はこちらから\n\(AppStoreLink.url.absoluteString)"
+        "「\(stage.name)」で遊んでみて！\nコード：\(StageShareCode.formatted(code))\n\(StageShareCode.url(for: code).absoluteString)\n\nKuttuke：\(AppStoreLink.url.absoluteString)"
     }
 
     /// 共有済みで編集もしていなければ、アップロードせずにコードを表示する
