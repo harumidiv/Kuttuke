@@ -98,7 +98,7 @@ struct ContentView: View {
                 Text("KUTTUKE")
                     .font(.system(size: 22, weight: .black, design: .rounded))
                     .tracking(1.4)
-                Text("じぶんの写真で、くっつけよう")
+                Text("じぶんの写真を、くっつけよう")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(KuttukeTheme.secondaryText)
             }
