@@ -167,7 +167,7 @@ struct SubjectLiftBatchEditorView: View {
                 }
                 Spacer()
 
-                if status == .unsupported || status == .failed {
+                if status == .noSubject || status == .unsupported || status == .failed {
                     analysisMessage(status)
                 }
             }
@@ -257,6 +257,9 @@ struct SubjectLiftBatchEditorView: View {
         case .ready:
             Label("長押しできます", systemImage: "hand.tap.fill")
                 .batchStatusCapsule()
+        case .noSubject:
+            Label("被写体が見つかりません", systemImage: "exclamationmark.triangle.fill")
+                .batchStatusCapsule()
         case .unsupported, .failed:
             Label("切り抜きできません", systemImage: "exclamationmark.triangle.fill")
                 .batchStatusCapsule()
@@ -264,15 +267,22 @@ struct SubjectLiftBatchEditorView: View {
     }
 
     private func analysisMessage(_ status: LiftAnalysisStatus) -> some View {
-        Text(status == .unsupported
-             ? "この端末は被写体の切り抜きに対応していません"
-             : "写真の解析に失敗しました")
+        let message: String
+        switch status {
+        case .noSubject:
+            message = LiftAnalysisStatus.noSubjectMessage
+        case .unsupported:
+            message = "この端末は被写体の切り抜きに対応していません"
+        default:
+            message = "写真の解析に失敗しました"
+        }
+        return Text(message)
             .font(.system(size: 12, weight: .bold, design: .rounded))
             .multilineTextAlignment(.center)
             .foregroundStyle(.white)
             .padding(.horizontal, 15)
             .padding(.vertical, 10)
-            .background(.black.opacity(0.68), in: Capsule())
+            .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var pageLoadingOverlay: some View {

@@ -6,8 +6,12 @@ import VisionKit
 enum LiftAnalysisStatus: Equatable {
     case analyzing
     case ready
+    // 解析は成功したが被写体が見つからない。誤判定もあり得るので長押しは有効のまま案内だけ出す
+    case noSubject
     case unsupported
     case failed
+
+    static let noSubjectMessage = "この写真からは被写体を切り抜けませんでした。\n人物・動物・物がはっきり写った写真をお試しください"
 }
 
 struct SubjectLiftEditorView: View {
@@ -136,7 +140,8 @@ struct SubjectLiftEditorView: View {
                 }
                 Spacer()
 
-                if analysisStatus == .unsupported ||
+                if analysisStatus == .noSubject ||
+                    analysisStatus == .unsupported ||
                     analysisStatus == .failed {
                     analysisMessage
                 }
@@ -167,6 +172,9 @@ struct SubjectLiftEditorView: View {
         case .ready:
             Label("長押しできます", systemImage: "hand.tap.fill")
                 .statusCapsule()
+        case .noSubject:
+            Label("被写体が見つかりません", systemImage: "exclamationmark.triangle.fill")
+                .statusCapsule()
         case .unsupported, .failed:
             Label("切り抜きできません", systemImage: "exclamationmark.triangle.fill")
                 .statusCapsule()
@@ -180,12 +188,14 @@ struct SubjectLiftEditorView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
-            .background(.black.opacity(0.68), in: Capsule())
+            .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .padding(.bottom, 4)
     }
 
     private var analysisMessageText: String {
         switch analysisStatus {
+        case .noSubject:
+            return LiftAnalysisStatus.noSubjectMessage
         case .unsupported:
             return "この端末は被写体の切り抜きに対応していません"
         case .failed:
@@ -417,10 +427,10 @@ struct LiftablePhotoView: UIViewRepresentable {
 
                     // Subject Lift prepares its subject regions lazily. Warm them up while
                     // the loading overlay is still visible, but never reject an empty result.
-                    _ = await interaction.subjects
+                    let subjects = await interaction.subjects
                     guard !Task.isCancelled else { return }
                     interaction.setContentsRectNeedsUpdate()
-                    onStatusChange(.ready)
+                    onStatusChange(subjects.isEmpty ? .noSubject : .ready)
                 } catch is CancellationError {
                     return
                 } catch {
