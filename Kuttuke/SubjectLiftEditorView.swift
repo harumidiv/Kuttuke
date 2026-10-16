@@ -6,12 +6,12 @@ import VisionKit
 enum LiftAnalysisStatus: Equatable {
     case analyzing
     case ready
-    // 解析は成功したが被写体が見つからない。誤判定もあり得るので長押しは有効のまま案内だけ出す
+    // 長押しした位置に被写体がなかった。別の位置で取れることもあるので長押しは有効のまま案内だけ出す
     case noSubject
     case unsupported
     case failed
 
-    static let noSubjectMessage = "この写真からは被写体を切り抜けませんでした。\n人物・動物・物がはっきり写った写真をお試しください"
+    static let noSubjectMessage = "長押しした場所から被写体を切り抜けませんでした。\n人物・動物・物の上を長押しするか、別の写真をお試しください"
 }
 
 struct SubjectLiftEditorView: View {
@@ -363,6 +363,7 @@ struct LiftablePhotoView: UIViewRepresentable {
         imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         imageView.image = image
+        imageView.addGestureRecognizer(context.coordinator.makeLongPressObserver())
         context.coordinator.setActive(isActive, on: imageView)
         context.coordinator.analyze(image)
         return imageView
@@ -382,14 +383,44 @@ struct LiftablePhotoView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let interaction = ImageAnalysisInteraction()
         var onStatusChange: (LiftAnalysisStatus) -> Void
         var analysisTask: Task<Void, Never>?
 
         init(onStatusChange: @escaping (LiftAnalysisStatus) -> Void) {
             self.onStatusChange = onStatusChange
+            super.init()
             interaction.preferredInteractionTypes = [.imageSubject]
+        }
+
+        /// 切り抜き操作を邪魔せずに長押しを見張り、押した位置に被写体がなければ案内を出す
+        func makeLongPressObserver() -> UILongPressGestureRecognizer {
+            let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delegate = self
+            return recognizer
+        }
+
+        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard recognizer.state == .began,
+                  let view = recognizer.view,
+                  interaction.view === view,
+                  interaction.analysis != nil else { return }
+            let point = recognizer.location(in: view)
+            Task { [weak self] in
+                guard let self else { return }
+                let subject = await interaction.subject(at: point)
+                onStatusChange(subject == nil ? .noSubject : .ready)
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
 
         func setActive(_ isActive: Bool, on imageView: UIImageView) {
@@ -427,10 +458,10 @@ struct LiftablePhotoView: UIViewRepresentable {
 
                     // Subject Lift prepares its subject regions lazily. Warm them up while
                     // the loading overlay is still visible, but never reject an empty result.
-                    let subjects = await interaction.subjects
+                    _ = await interaction.subjects
                     guard !Task.isCancelled else { return }
                     interaction.setContentsRectNeedsUpdate()
-                    onStatusChange(subjects.isEmpty ? .noSubject : .ready)
+                    onStatusChange(.ready)
                 } catch is CancellationError {
                     return
                 } catch {
