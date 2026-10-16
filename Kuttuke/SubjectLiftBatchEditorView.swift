@@ -274,9 +274,9 @@ struct SubjectLiftBatchEditorView: View {
         case .missedSubject:
             message = LiftAnalysisStatus.missedSubjectMessage
         case .unsupported:
-            message = "この端末は被写体の切り抜きに対応していません"
+            message = String(localized: "この端末は被写体の切り抜きに対応していません")
         default:
-            message = "写真の解析に失敗しました"
+            message = String(localized: "写真の解析に失敗しました")
         }
         return Text(message)
             .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -370,7 +370,7 @@ struct SubjectLiftBatchEditorView: View {
                     Image(systemName: isDropTargeted ? "hand.point.down.fill" : "square.and.arrow.down")
                         .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(isDropTargeted ? KuttukeTheme.orange : KuttukeTheme.secondaryText)
-                    Text(isDropTargeted ? "ここで指を離す" : "切り抜きを置く")
+                    Text(isDropTargeted ? String(localized: "ここで指を離す") : String(localized: "切り抜きを置く"))
                         .font(.system(size: 13, weight: .black, design: .rounded))
                 }
             }
@@ -378,7 +378,7 @@ struct SubjectLiftBatchEditorView: View {
             let destinationPhotoID = currentPhoto.id
             SubjectDropReceiver(isTargeted: $isDropTargeted) { image in
                 guard totalLiftedSubjectCount < maximumCutouts else {
-                    library.errorMessage = "切り抜きは最大\(maximumCutouts)個まで追加できます。"
+                    library.errorMessage = String(localized: "切り抜きは最大\(maximumCutouts)個まで追加できます。")
                     return
                 }
                 liftedSubjects[destinationPhotoID, default: []].append(BatchLiftedSubject(image: image))
@@ -393,7 +393,7 @@ struct SubjectLiftBatchEditorView: View {
     private var saveButton: some View {
         Button { saveSubjects() } label: {
             Label(
-                totalLiftedSubjectCount == 0 ? "切り抜きを選択してください" : "\(totalLiftedSubjectCount)個の切り抜きを保存",
+                totalLiftedSubjectCount == 0 ? String(localized: "切り抜きを選択してください") : String(localized: "\(totalLiftedSubjectCount)個の切り抜きを保存"),
                 systemImage: "checkmark.circle.fill"
             )
             .font(.system(size: 16, weight: .black, design: .rounded))
@@ -439,7 +439,7 @@ struct SubjectLiftBatchEditorView: View {
         isSaving = true
         Task {
             for (index, item) in pending.enumerated() {
-                savingProgress = "\(index + 1) / \(pending.count)個"
+                savingProgress = String(localized: "\(index + 1) / \(pending.count)個")
                 guard let assetID = await library.addLiftedSubject(item.subject.image) else {
                     isSaving = false
                     savingProgress = ""

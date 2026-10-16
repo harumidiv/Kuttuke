@@ -57,7 +57,7 @@ struct SubjectLibraryView: View {
                     processingOverlay
                 }
             }
-            .navigationTitle(stage == nil ? "進化セットを作成" : "進化セットを編集")
+            .navigationTitle(stage == nil ? String(localized: "進化セットを作成") : String(localized: "進化セットを編集"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -214,8 +214,8 @@ struct SubjectLibraryView: View {
                 Text("レベル \(index + 1)")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                 Text(index == selectedAssetIDs.count - 1
-                     ? "最終形態（2つくっつくと消えてボーナス点）"
-                     : "同じレベル同士で進化")
+                     ? String(localized: "最終形態（2つくっつくと消えてボーナス点）")
+                     : String(localized: "同じレベル同士で進化"))
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(KuttukeTheme.secondaryText)
             }
@@ -227,14 +227,14 @@ struct SubjectLibraryView: View {
                 VStack(spacing: 0) {
                     moveButton(
                         systemImage: "chevron.up",
-                        label: "レベル\(index + 1)を1つ上へ",
+                        label: String(localized: "レベル\(index + 1)を1つ上へ"),
                         isEnabled: index > 0
                     ) {
                         moveSelection(at: index, by: -1)
                     }
                     moveButton(
                         systemImage: "chevron.down",
-                        label: "レベル\(index + 1)を1つ下へ",
+                        label: String(localized: "レベル\(index + 1)を1つ下へ"),
                         isEnabled: index < selectedAssetIDs.count - 1
                     ) {
                         moveSelection(at: index, by: 1)
@@ -380,7 +380,7 @@ struct SubjectLibraryView: View {
         }
     }
 
-    private func actionLabel(icon: String, title: String, filled: Bool) -> some View {
+    private func actionLabel(icon: String, title: LocalizedStringKey, filled: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .bold))
@@ -423,7 +423,7 @@ struct SubjectLibraryView: View {
                     }
                 }
 
-                Label(selectedIndex == nil ? "追加" : "選択中", systemImage: selectedIndex == nil ? "plus.circle" : "checkmark.circle.fill")
+                Label(selectedIndex == nil ? String(localized: "追加") : String(localized: "選択中"), systemImage: selectedIndex == nil ? "plus.circle" : "checkmark.circle.fill")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(selectedIndex == nil ? KuttukeTheme.secondaryText : KuttukeTheme.orange)
             }
@@ -496,7 +496,7 @@ struct SubjectLibraryView: View {
                 ProgressView()
                     .tint(KuttukeTheme.orange)
                     .scaleEffect(1.2)
-                Text(isLoadingPhoto ? "写真を読み込んでいます…" : "切り抜きを保存しています…")
+                Text(isLoadingPhoto ? String(localized: "写真を読み込んでいます…") : String(localized: "切り抜きを保存しています…"))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                 if isLoadingPhoto, !loadingPhotoProgress.isEmpty {
                     Text(loadingPhotoProgress)
@@ -521,7 +521,7 @@ struct SubjectLibraryView: View {
     private func addToStage(_ assetID: UUID) {
         guard !selectedAssetIDs.contains(assetID) else { return }
         guard selectedAssetIDs.count < SubjectLibrary.maximumStageItems else {
-            library.errorMessage = "1つの進化セットに追加できる素材は最大\(SubjectLibrary.maximumStageItems)個です。"
+            library.errorMessage = String(localized: "1つの進化セットに追加できる素材は最大\(SubjectLibrary.maximumStageItems)個です。")
             return
         }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
@@ -574,13 +574,13 @@ struct SubjectLibraryView: View {
     private func openPhotos(_ items: [PhotosPickerItem]) async {
         guard !isLoadingPhoto else { return }
         isLoadingPhoto = true
-        loadingPhotoProgress = "0 / \(items.count)枚"
+        loadingPhotoProgress = String(localized: "\(0) / \(items.count)枚")
 
         var images: [UIImage] = []
         var failureCount = 0
 
         for (index, item) in items.enumerated() {
-            loadingPhotoProgress = "\(index + 1) / \(items.count)枚"
+            loadingPhotoProgress = String(localized: "\(index + 1) / \(items.count)枚")
             do {
                 guard let data = try await item.loadTransferable(type: Data.self) else {
                     throw SubjectProcessingError.unreadableImage
@@ -611,7 +611,7 @@ struct SubjectLibraryView: View {
         if pendingLoadFailureCount > 0 {
             let count = pendingLoadFailureCount
             pendingLoadFailureCount = 0
-            library.errorMessage = "\(count)枚の写真を読み込めませんでした。もう一度選択してください。"
+            library.errorMessage = String(localized: "\(count)枚の写真を読み込めませんでした。もう一度選択してください。")
         }
     }
 

@@ -142,6 +142,8 @@ struct ContentView: View {
                         .foregroundStyle(KuttukeTheme.secondaryText)
                     Text("進化セット")
                         .font(.system(size: 21, weight: .black, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
                 Spacer()
                 Button {
@@ -149,6 +151,8 @@ struct ContentView: View {
                 } label: {
                     Label("受け取る", systemImage: "tray.and.arrow.down.fill")
                         .font(.system(size: 13, weight: .black, design: .rounded))
+                        .lineLimit(1)
+                        .fixedSize()
                         .foregroundStyle(KuttukeTheme.ink)
                         .padding(.horizontal, 14)
                         .frame(height: 38)
@@ -161,6 +165,8 @@ struct ContentView: View {
                 } label: {
                     Label("作る", systemImage: "plus")
                         .font(.system(size: 13, weight: .black, design: .rounded))
+                        .lineLimit(1)
+                        .fixedSize()
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .frame(height: 38)
@@ -216,7 +222,7 @@ struct ContentView: View {
                     Text(stage.name)
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .lineLimit(1)
-                    Text(isPlayable ? "\(images.count)個の素材・プレイできます" : "あと\(remainingCount)個追加で遊べます")
+                    Text(isPlayable ? String(localized: "\(images.count)個の素材・プレイできます") : String(localized: "あと\(remainingCount)個追加で遊べます"))
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(isPlayable ? KuttukeTheme.secondaryText : KuttukeTheme.orange)
                 }
@@ -259,7 +265,7 @@ struct ContentView: View {
                     playingStageID = stage.id
                 }
             } label: {
-                Label(isPlayable ? "このステージであそぶ" : "6個以上であそべます", systemImage: "play.fill")
+                Label(isPlayable ? String(localized: "このステージであそぶ") : String(localized: "6個以上であそべます"), systemImage: "play.fill")
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)

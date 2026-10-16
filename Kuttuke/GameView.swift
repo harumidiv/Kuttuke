@@ -211,7 +211,7 @@ struct GameView: View {
                     .background(.white.opacity(0.9), in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(model.isPaused ? "再開" : "一時停止")
+            .accessibilityLabel(model.isPaused ? String(localized: "再開") : String(localized: "一時停止"))
         }
     }
 
@@ -324,9 +324,10 @@ struct GameView: View {
     }
 
     private var shareMessage: String {
-        let headline = model.didUpdateBestScore ? "自己ベスト更新！" : ""
-        let rankText = model.leaderboardRank.map { "\($0.itemCount)個ランキングで全国\($0.rank)位！" } ?? ""
-        return "\(headline)「\(stageName)」で\(model.score)点！\(rankText) #Kuttuke\n\(AppStoreLink.url.absoluteString)"
+        let headline = model.didUpdateBestScore ? String(localized: "自己ベスト更新！") : ""
+        let rankText = model.leaderboardRank.map { String(localized: "\($0.itemCount)個ランキングで全国\($0.rank)位！") } ?? ""
+        let scoreText = String(localized: "「\(stageName)」で\(model.score)点！")
+        return "\(headline)\(scoreText)\(rankText) #Kuttuke\n\(AppStoreLink.url.absoluteString)"
     }
 
     /// 盤面のスクショにステージ名とスコアを添えたシェア用画像を作る

@@ -137,11 +137,11 @@ private struct TutorialView: View {
 
                     tutorialStep(
                         number: 1,
-                        title: "進化セットを作る",
+                        title: String(localized: "進化セットを作る"),
                         details: [
-                            "ホームの「作る」をタップします",
-                            "保存済み素材か、新しい写真を選びます",
-                            "素材を6〜11個選ぶとプレイできます"
+                            String(localized: "ホームの「作る」をタップします"),
+                            String(localized: "保存済み素材か、新しい写真を選びます"),
+                            String(localized: "素材を6〜11個選ぶとプレイできます")
                         ],
                         accent: KuttukeTheme.orange,
                         visual: .stage
@@ -149,11 +149,11 @@ private struct TutorialView: View {
 
                     tutorialStep(
                         number: 2,
-                        title: "写真から切り抜く",
+                        title: String(localized: "写真から切り抜く"),
                         details: [
-                            "写真は一度に複数選択できます",
-                            "準備完了後、被写体を長押しします",
-                            "光った被写体を下の枠へ運び「完了」で保存します"
+                            String(localized: "写真は一度に複数選択できます"),
+                            String(localized: "準備完了後、被写体を長押しします"),
+                            String(localized: "光った被写体を下の枠へ運び「完了」で保存します")
                         ],
                         accent: KuttukeTheme.pink,
                         visual: .lift
@@ -161,11 +161,11 @@ private struct TutorialView: View {
 
                     tutorialStep(
                         number: 3,
-                        title: "進化順を決める",
+                        title: String(localized: "進化順を決める"),
                         details: [
-                            "上から小さい順に並びます",
-                            "右側のハンドルを長押ししてドラッグすると並べ替えられます",
-                            "切り抜きは別のセットでも再利用できます"
+                            String(localized: "上から小さい順に並びます"),
+                            String(localized: "右側のハンドルを長押ししてドラッグすると並べ替えられます"),
+                            String(localized: "切り抜きは別のセットでも再利用できます")
                         ],
                         accent: KuttukeTheme.purple,
                         visual: .order
@@ -173,11 +173,11 @@ private struct TutorialView: View {
 
                     tutorialStep(
                         number: 4,
-                        title: "落として、くっつける",
+                        title: String(localized: "落として、くっつける"),
                         details: [
-                            "指を左右に動かし、離した位置から落とします",
-                            "同じレベル同士が触れると次の姿へ進化します",
-                            "積み上がってLIMITを超え続けるとゲーム終了です"
+                            String(localized: "指を左右に動かし、離した位置から落とします"),
+                            String(localized: "同じレベル同士が触れると次の姿へ進化します"),
+                            String(localized: "積み上がってLIMITを超え続けるとゲーム終了です")
                         ],
                         accent: .green,
                         visual: .play

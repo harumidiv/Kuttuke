@@ -157,7 +157,7 @@ struct StageShareView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation { didCopy = true }
             } label: {
-                Label(didCopy ? "コピーしました" : "コードをコピー", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                Label(didCopy ? String(localized: "コピーしました") : String(localized: "コードをコピー"), systemImage: didCopy ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(KuttukeTheme.ink)
                     .frame(maxWidth: .infinity)
@@ -199,7 +199,7 @@ struct StageShareView: View {
         .background(.white, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
     }
 
-    private func primaryButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func primaryButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.system(size: 15, weight: .black, design: .rounded))
@@ -212,7 +212,7 @@ struct StageShareView: View {
     }
 
     private func shareMessage(_ stage: GameStage, code: String) -> String {
-        "「\(stage.name)」で遊んでみて！\nコード：\(StageShareCode.formatted(code))\n\(StageShareCode.url(for: code).absoluteString)\n\nKuttuke：\(AppStoreLink.url.absoluteString)"
+        String(localized: "「\(stage.name)」で遊んでみて！\nコード：\(StageShareCode.formatted(code))") + "\n\(StageShareCode.url(for: code).absoluteString)\n\nKuttuke: \(AppStoreLink.url.absoluteString)"
     }
 
     /// 共有済みで編集もしていなければ、アップロードせずにコードを表示する
@@ -366,7 +366,7 @@ struct StageReceiveView: View {
                 Text(received.name)
                     .font(.system(size: 19, weight: .black, design: .rounded))
                     .lineLimit(1)
-                Text(received.hasSounds ? "\(received.images.count)個の素材・進化音つき" : "\(received.images.count)個の素材")
+                Text(received.hasSounds ? String(localized: "\(received.images.count)個の素材・進化音つき") : String(localized: "\(received.images.count)個の素材"))
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(KuttukeTheme.secondaryText)
             }
