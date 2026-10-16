@@ -167,7 +167,7 @@ struct SubjectLiftBatchEditorView: View {
                 }
                 Spacer()
 
-                if status == .noSubject || status == .unsupported || status == .failed {
+                if status == .noSubject || status == .missedSubject || status == .unsupported || status == .failed {
                     analysisMessage(status)
                 }
             }
@@ -257,7 +257,7 @@ struct SubjectLiftBatchEditorView: View {
         case .ready:
             Label("長押しできます", systemImage: "hand.tap.fill")
                 .batchStatusCapsule()
-        case .noSubject:
+        case .noSubject, .missedSubject:
             Label("被写体が見つかりません", systemImage: "exclamationmark.triangle.fill")
                 .batchStatusCapsule()
         case .unsupported, .failed:
@@ -271,6 +271,8 @@ struct SubjectLiftBatchEditorView: View {
         switch status {
         case .noSubject:
             message = LiftAnalysisStatus.noSubjectMessage
+        case .missedSubject:
+            message = LiftAnalysisStatus.missedSubjectMessage
         case .unsupported:
             message = "この端末は被写体の切り抜きに対応していません"
         default:

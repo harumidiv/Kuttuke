@@ -1,17 +1,21 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+import Vision
 import VisionKit
 
 enum LiftAnalysisStatus: Equatable {
     case analyzing
     case ready
-    // 長押しした位置に被写体がなかった。別の位置で取れることもあるので長押しは有効のまま案内だけ出す
+    // 写真全体から被写体が検出できなかった。誤判定もあり得るので長押しは有効のまま案内だけ出す
     case noSubject
+    // 長押しした位置に被写体がなかった。別の位置で取れることもある
+    case missedSubject
     case unsupported
     case failed
 
-    static let noSubjectMessage = "長押しした場所から被写体を切り抜けませんでした。\n人物・動物・物の上を長押しするか、別の写真をお試しください"
+    static let noSubjectMessage = "この写真からは被写体を切り抜けませんでした。\n人物・動物・物がはっきり写った写真をお試しください"
+    static let missedSubjectMessage = "長押しした場所から被写体を切り抜けませんでした。\n人物・動物・物の上を長押しするか、別の写真をお試しください"
 }
 
 struct SubjectLiftEditorView: View {
@@ -141,6 +145,7 @@ struct SubjectLiftEditorView: View {
                 Spacer()
 
                 if analysisStatus == .noSubject ||
+                    analysisStatus == .missedSubject ||
                     analysisStatus == .unsupported ||
                     analysisStatus == .failed {
                     analysisMessage
@@ -172,7 +177,7 @@ struct SubjectLiftEditorView: View {
         case .ready:
             Label("長押しできます", systemImage: "hand.tap.fill")
                 .statusCapsule()
-        case .noSubject:
+        case .noSubject, .missedSubject:
             Label("被写体が見つかりません", systemImage: "exclamationmark.triangle.fill")
                 .statusCapsule()
         case .unsupported, .failed:
@@ -196,6 +201,8 @@ struct SubjectLiftEditorView: View {
         switch analysisStatus {
         case .noSubject:
             return LiftAnalysisStatus.noSubjectMessage
+        case .missedSubject:
+            return LiftAnalysisStatus.missedSubjectMessage
         case .unsupported:
             return "この端末は被写体の切り抜きに対応していません"
         case .failed:
@@ -387,6 +394,8 @@ struct LiftablePhotoView: UIViewRepresentable {
         let interaction = ImageAnalysisInteraction()
         var onStatusChange: (LiftAnalysisStatus) -> Void
         var analysisTask: Task<Void, Never>?
+        /// Vision で写真全体に被写体が見つかったか。判定できなかったときは nil
+        private var photoHasSubject: Bool?
 
         init(onStatusChange: @escaping (LiftAnalysisStatus) -> Void) {
             self.onStatusChange = onStatusChange
@@ -412,7 +421,11 @@ struct LiftablePhotoView: UIViewRepresentable {
             Task { [weak self] in
                 guard let self else { return }
                 let subject = await interaction.subject(at: point)
-                onStatusChange(subject == nil ? .noSubject : .ready)
+                if subject != nil {
+                    onStatusChange(.ready)
+                } else {
+                    onStatusChange(photoHasSubject == false ? .noSubject : .missedSubject)
+                }
             }
         }
 
@@ -436,6 +449,7 @@ struct LiftablePhotoView: UIViewRepresentable {
         func analyze(_ image: UIImage) {
             analysisTask?.cancel()
             interaction.analysis = nil
+            photoHasSubject = nil
             Task { @MainActor [onStatusChange] in
                 onStatusChange(.analyzing)
             }
@@ -459,15 +473,34 @@ struct LiftablePhotoView: UIViewRepresentable {
                     // Subject Lift prepares its subject regions lazily. Warm them up while
                     // the loading overlay is still visible, but never reject an empty result.
                     _ = await interaction.subjects
+                    // interaction.subjects は遅れて揃い空のことがあるため、被写体の有無は Vision で別に調べる
+                    let hasSubject = await Self.detectForegroundSubject(in: image)
                     guard !Task.isCancelled else { return }
+                    photoHasSubject = hasSubject
                     interaction.setContentsRectNeedsUpdate()
-                    onStatusChange(.ready)
+                    onStatusChange(hasSubject == false ? .noSubject : .ready)
                 } catch is CancellationError {
                     return
                 } catch {
                     onStatusChange(.failed)
                 }
             }
+        }
+
+        /// Subject Lift と同じ前景抽出で、写真に切り抜ける被写体があるかを調べる。判定できなければ nil
+        nonisolated private static func detectForegroundSubject(in image: UIImage) async -> Bool? {
+            guard let cgImage = image.cgImage else { return nil }
+            return await Task.detached(priority: .userInitiated) {
+                let request = VNGenerateForegroundInstanceMaskRequest()
+                let handler = VNImageRequestHandler(cgImage: cgImage)
+                do {
+                    try handler.perform([request])
+                } catch {
+                    return nil
+                }
+                guard let observation = request.results?.first else { return false }
+                return !observation.allInstances.isEmpty
+            }.value
         }
     }
 }
