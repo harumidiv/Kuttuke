@@ -82,23 +82,23 @@ enum StageShareError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            "共有するにはiCloudへのサインインが必要です。設定アプリの一番上からApple アカウントでサインインしてください。"
+            String(localized: "共有するにはiCloudへのサインインが必要です。設定アプリの一番上からApple アカウントでサインインしてください。")
         case .network:
-            "インターネットに接続できませんでした。通信環境を確認して、もう一度お試しください。"
+            String(localized: "インターネットに接続できませんでした。通信環境を確認して、もう一度お試しください。")
         case .notFound:
-            "このコードのステージは見つかりませんでした。コードを確認してください。"
+            String(localized: "このコードのステージは見つかりませんでした。コードを確認してください。")
         case .invalidCode:
-            "コードは「ABCD-EFGH」のような8文字です。"
+            String(localized: "コードは「ABCD-EFGH」のような8文字です。")
         case .unsupportedVersion:
-            "このステージを開くには、アプリを最新版にアップデートしてください。"
+            String(localized: "このステージを開くには、アプリを最新版にアップデートしてください。")
         case .brokenData:
-            "このステージのデータを読み込めませんでした。"
+            String(localized: "このステージのデータを読み込めませんでした。")
         case .notPlayable:
-            "共有できるのは素材が\(SubjectLibrary.minimumPlayableItems)個以上のステージです。"
+            String(localized: "共有できるのは素材が\(SubjectLibrary.minimumPlayableItems)個以上のステージです。")
         case .failed:
-            "共有できませんでした。時間をおいて、もう一度お試しください。"
+            String(localized: "共有できませんでした。時間をおいて、もう一度お試しください。")
         case .receiveFailed:
-            "受け取れませんでした。時間をおいて、もう一度お試しください。"
+            String(localized: "受け取れませんでした。時間をおいて、もう一度お試しください。")
         }
     }
 }
@@ -202,7 +202,7 @@ final class StageShareService {
 
         return ReceivedStage(
             code: code,
-            name: (record["name"] as? String) ?? "もらったステージ",
+            name: (record["name"] as? String) ?? String(localized: "もらったステージ"),
             imageData: imageData,
             images: images,
             soundURLs: soundURLs

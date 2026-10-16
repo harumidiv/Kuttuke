@@ -45,7 +45,7 @@ struct AssetManagementView: View {
             ),
             presenting: assetPendingDeletion
         ) { asset in
-            Button(library.stages(using: asset.id).isEmpty ? "削除" : "ステージから外して削除", role: .destructive) {
+            Button(library.stages(using: asset.id).isEmpty ? String(localized: "削除") : String(localized: "ステージから外して削除"), role: .destructive) {
                 withAnimation { library.remove(asset) }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
@@ -76,7 +76,7 @@ struct AssetManagementView: View {
                             .padding(6)
                     }
 
-                Text(usageCount == 0 ? "未使用" : "\(usageCount)ステージで使用中")
+                Text(usageCount == 0 ? String(localized: "未使用") : String(localized: "\(usageCount)ステージで使用中"))
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundStyle(usageCount == 0 ? KuttukeTheme.secondaryText : KuttukeTheme.orange)
                     .lineLimit(1)
@@ -86,7 +86,7 @@ struct AssetManagementView: View {
             .background(.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(BouncyButtonStyle())
-        .accessibilityLabel(usageCount == 0 ? "未使用の切り抜き" : "\(usageCount)ステージで使用中の切り抜き")
+        .accessibilityLabel(usageCount == 0 ? String(localized: "未使用の切り抜き") : String(localized: "\(usageCount)ステージで使用中の切り抜き"))
         .accessibilityHint("タップすると削除の確認が表示されます")
     }
 

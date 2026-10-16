@@ -104,14 +104,14 @@ final class SubjectLibrary: ObservableObject {
     func deletionWarning(for asset: SubjectAsset) -> String {
         let usingStages = stages(using: asset.id)
         guard !usingStages.isEmpty else {
-            return "どのステージにも使われていません。削除すると元に戻せません。"
+            return String(localized: "どのステージにも使われていません。削除すると元に戻せません。")
         }
-        let names = usingStages.map { "「\($0.name)」" }.joined()
-        var message = "\(names)で使われています。削除するとこれらのステージから外れ、設定した進化音も消えます。"
+        let names = ListFormatter.localizedString(byJoining: usingStages.map { String(localized: "「\($0.name)」") })
+        var message = String(localized: "\(names)で使われています。削除するとこれらのステージから外れ、設定した進化音も消えます。")
         let unplayable = usingStages.filter { isPlayable($0) && images(for: $0).count - 1 < Self.minimumPlayableItems }
         if !unplayable.isEmpty {
-            let unplayableNames = unplayable.map { "「\($0.name)」" }.joined()
-            message += "\n\(unplayableNames)は素材が\(Self.minimumPlayableItems)個未満になり、遊べなくなります。"
+            let unplayableNames = ListFormatter.localizedString(byJoining: unplayable.map { String(localized: "「\($0.name)」") })
+            message += "\n" + String(localized: "\(unplayableNames)は素材が\(Self.minimumPlayableItems)個未満になり、遊べなくなります。")
         }
         return message
     }
@@ -124,7 +124,7 @@ final class SubjectLibrary: ObservableObject {
     func importPastedImage() async -> UUID? {
         guard let image = UIPasteboard.general.image,
               let data = image.pngData() else {
-            errorMessage = "コピーされた画像が見つかりません。写真アプリで被写体を長押しして「コピー」してから、もう一度お試しください。"
+            errorMessage = String(localized: "コピーされた画像が見つかりません。写真アプリで被写体を長押しして「コピー」してから、もう一度お試しください。")
             return nil
         }
 
@@ -162,7 +162,7 @@ final class SubjectLibrary: ObservableObject {
     ) -> UUID? {
         let validIDs = uniqueValidAssetIDs(from: assetIDs)
         guard !validIDs.isEmpty else {
-            errorMessage = "ステージには切り抜き素材を1個以上追加してください。"
+            errorMessage = String(localized: "ステージには切り抜き素材を1個以上追加してください。")
             return nil
         }
 
@@ -186,7 +186,7 @@ final class SubjectLibrary: ObservableObject {
         }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let stageName = trimmedName.isEmpty ? "ステージ \(stages.count + 1)" : trimmedName
+        let stageName = trimmedName.isEmpty ? String(localized: "ステージ \(stages.count + 1)") : trimmedName
         let now = Date()
 
         if let id, let index = stages.firstIndex(where: { $0.id == id }) {
@@ -267,7 +267,7 @@ final class SubjectLibrary: ObservableObject {
             }
         } catch {
             newAssets.forEach { try? fileManager.removeItem(at: assetsDirectory.appendingPathComponent($0.fileName)) }
-            errorMessage = "ステージを追加できませんでした。"
+            errorMessage = String(localized: "ステージを追加できませんでした。")
             return nil
         }
 
@@ -294,7 +294,7 @@ final class SubjectLibrary: ObservableObject {
             try fileManager.copyItem(at: temporaryURL, to: soundsDirectory.appendingPathComponent(fileName))
             return fileName
         } catch {
-            errorMessage = "進化音を保存できませんでした。"
+            errorMessage = String(localized: "進化音を保存できませんでした。")
             return nil
         }
     }
@@ -394,7 +394,7 @@ final class SubjectLibrary: ObservableObject {
                 return validStage
             }
         } catch {
-            errorMessage = "保存済みステージを読み込めませんでした。"
+            errorMessage = String(localized: "保存済みステージを読み込めませんでした。")
         }
     }
 
@@ -408,7 +408,7 @@ final class SubjectLibrary: ObservableObject {
             try data.write(to: stagesURL, options: .atomic)
             return true
         } catch {
-            errorMessage = "ステージを保存できませんでした。"
+            errorMessage = String(localized: "ステージを保存できませんでした。")
             return false
         }
     }
@@ -424,7 +424,7 @@ final class SubjectLibrary: ObservableObject {
         let now = Date()
         stages = [GameStage(
             id: UUID(),
-            name: "マイステージ",
+            name: String(localized: "マイステージ"),
             assetIDs: Array(assets.prefix(Self.maximumStageItems)).map(\.id),
             createdAt: now,
             updatedAt: now

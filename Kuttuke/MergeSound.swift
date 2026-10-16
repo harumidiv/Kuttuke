@@ -83,13 +83,13 @@ enum MergeSoundError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .microphoneDenied:
-            "マイクへのアクセスが許可されていません。設定アプリの「Kuttuke」からマイクを許可してください。"
+            String(localized: "マイクへのアクセスが許可されていません。設定アプリの「Kuttuke」からマイクを許可してください。")
         case .recordingFailed:
-            "録音を開始できませんでした。"
+            String(localized: "録音を開始できませんでした。")
         case .unreadableFile:
-            "この音声ファイルは読み込めませんでした。"
+            String(localized: "この音声ファイルは読み込めませんでした。")
         case .tooLong:
-            "\(Int(StageSoundDraft.maximumFileDuration))秒以内の音声ファイルを選んでください。"
+            String(localized: "\(Int(StageSoundDraft.maximumFileDuration))秒以内の音声ファイルを選んでください。")
         }
     }
 }

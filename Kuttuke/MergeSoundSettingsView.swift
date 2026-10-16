@@ -120,7 +120,7 @@ struct MergeSoundSettingsView: View {
                     Button {
                         toggleRecording(for: asset.id)
                     } label: {
-                        Label(isRecordingThis ? "停止" : "録音する", systemImage: isRecordingThis ? "stop.fill" : "mic.fill")
+                        Label(isRecordingThis ? String(localized: "停止") : String(localized: "録音する"), systemImage: isRecordingThis ? "stop.fill" : "mic.fill")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
@@ -158,12 +158,12 @@ struct MergeSoundSettingsView: View {
     }
 
     private func statusText(for assetID: UUID, isFirstLevel: Bool, isRecording: Bool) -> String {
-        if isFirstLevel { return "最初の姿のため、進化音はありません" }
+        if isFirstLevel { return String(localized: "最初の姿のため、進化音はありません") }
         if isRecording {
-            return String(format: "録音中… %.1f / %.0f秒", soundDraft.recordingElapsed, StageSoundDraft.maximumRecordingDuration)
+            return String(format: String(localized: "録音中… %.1f / %.0f秒"), soundDraft.recordingElapsed, StageSoundDraft.maximumRecordingDuration)
         }
-        if soundDraft.hasUnsavedSound(for: assetID) { return "新しい音（保存すると反映）" }
-        return soundDraft.url(for: assetID) == nil ? "未設定（標準の「ぽよん」が鳴ります）" : "設定済み"
+        if soundDraft.hasUnsavedSound(for: assetID) { return String(localized: "新しい音（保存すると反映）") }
+        return soundDraft.url(for: assetID) == nil ? String(localized: "未設定（標準の「ぽよん」が鳴ります）") : String(localized: "設定済み")
     }
 
     private func toggleRecording(for assetID: UUID) {

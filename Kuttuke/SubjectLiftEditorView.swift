@@ -14,8 +14,12 @@ enum LiftAnalysisStatus: Equatable {
     case unsupported
     case failed
 
-    static let noSubjectMessage = "この写真からは被写体を切り抜けませんでした。\n人物・動物・物がはっきり写った写真をお試しください"
-    static let missedSubjectMessage = "長押しした場所から被写体を切り抜けませんでした。\n人物・動物・物の上を長押しするか、別の写真をお試しください"
+    static var noSubjectMessage: String {
+        String(localized: "この写真からは被写体を切り抜けませんでした。\n人物・動物・物がはっきり写った写真をお試しください")
+    }
+    static var missedSubjectMessage: String {
+        String(localized: "長押しした場所から被写体を切り抜けませんでした。\n人物・動物・物の上を長押しするか、別の写真をお試しください")
+    }
 }
 
 struct SubjectLiftEditorView: View {
@@ -204,9 +208,9 @@ struct SubjectLiftEditorView: View {
         case .missedSubject:
             return LiftAnalysisStatus.missedSubjectMessage
         case .unsupported:
-            return "この端末は被写体の切り抜きに対応していません"
+            return String(localized: "この端末は被写体の切り抜きに対応していません")
         case .failed:
-            return "写真の解析に失敗しました。別の写真をお試しください"
+            return String(localized: "写真の解析に失敗しました。別の写真をお試しください")
         case .analyzing, .ready:
             return ""
         }
@@ -256,7 +260,7 @@ struct SubjectLiftEditorView: View {
                     Image(systemName: isDropTargeted ? "hand.point.down.fill" : "square.and.arrow.down")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(isDropTargeted ? KuttukeTheme.orange : KuttukeTheme.secondaryText)
-                    Text(isDropTargeted ? "ここで指を離す" : "切り抜きを置く")
+                    Text(isDropTargeted ? String(localized: "ここで指を離す") : String(localized: "切り抜きを置く"))
                         .font(.system(size: 14, weight: .black, design: .rounded))
                     Text("背景が透明な画像だけが登録されます")
                         .font(.system(size: 10, weight: .medium, design: .rounded))
