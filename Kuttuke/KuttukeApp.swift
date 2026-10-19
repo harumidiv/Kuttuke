@@ -14,14 +14,16 @@ enum AppStoreLink {
 
 @main
 struct KuttukeApp: App {
-    init() {
-        InterstitialAdManager.shared.start()
-    }
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .tint(KuttukeTheme.orange)
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard phase == .active else { return }
+            Task { await InterstitialAdManager.shared.start() }
         }
     }
 }
