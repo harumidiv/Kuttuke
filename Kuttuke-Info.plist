@@ -19,6 +19,8 @@
 	<string>ステージで進化したときに鳴らす音を録音するために使用します。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>シェア用のスコア画像を写真に保存するために使用します。</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>あなたに合った広告を表示するために使用します。</string>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-8522231452310619~8753897410</string>
 	<key>SKAdNetworkItems</key>

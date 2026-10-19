@@ -1,3 +1,4 @@
+import AppTrackingTransparency
 import GoogleMobileAds
 import UIKit
 
@@ -16,12 +17,19 @@ final class InterstitialAdManager: NSObject, FullScreenContentDelegate {
     private var interstitial: InterstitialAd?
     private var isLoading = false
     private var onDismiss: (() -> Void)?
+    private var hasStarted = false
 
     private override init() {
         super.init()
     }
 
-    func start() {
+    /// ATTの許可を求めてから広告SDKを初期化する。ATTダイアログはアプリがアクティブな状態でないと表示されないため、アクティブになってから呼ぶこと
+    func start() async {
+        guard !hasStarted else { return }
+        hasStarted = true
+        if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+            _ = await ATTrackingManager.requestTrackingAuthorization()
+        }
         MobileAds.shared.start(completionHandler: nil)
         load()
     }
