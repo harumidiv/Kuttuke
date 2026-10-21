@@ -19,7 +19,8 @@ struct ContentView: View {
                     images: library.images(for: stage),
                     stageID: stage.id,
                     stageName: stage.name,
-                    mergeSoundURLs: library.mergeSoundURLs(for: stage)
+                    mergeSoundURLs: library.mergeSoundURLs(for: stage),
+                    rareEffects: library.rareEffects(for: stage)
                 ) {
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
                         playingStageID = nil

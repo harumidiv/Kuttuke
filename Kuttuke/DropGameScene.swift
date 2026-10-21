@@ -25,6 +25,10 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     // 当たり判定用の低解像度テクスチャ。輪郭の頂点数を減らし、アイテムが増えても衝突計算を軽くする
     private let physicsTextures: [SKTexture]
     private static let physicsTexturePixelSize: CGFloat = 64
+    /// レベルごとのキラ加工。nilは加工なし
+    private let rareEffects: [RareEffect?]
+    private let rareShaders = RareEffectSpriteShaders()
+    private var isUsingTilt = false
     private let itemCategory: UInt32 = 1 << 0
     private let wallCategory: UInt32 = 1 << 1
     private var currentNode: SKSpriteNode?
@@ -48,7 +52,8 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     private let dangerLineName = "danger-line"
     private let boardInset: CGFloat = 11
 
-    init(images: [UIImage]) {
+    init(images: [UIImage], rareEffects: [RareEffect?] = []) {
+        self.rareEffects = rareEffects
         textures = images.map {
             let texture = SKTexture(image: $0)
             texture.filteringMode = .linear
@@ -73,7 +78,18 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         buildBoard()
         warmUpPhysicsBodies()
         warmUpScoreLabelFont()
+        if rareEffects.contains(where: { $0 != nil }), !isUsingTilt {
+            isUsingTilt = true
+            TiltMotion.shared.start()
+        }
         prepareNextRound()
+    }
+
+    override func willMove(from view: SKView) {
+        if isUsingTilt {
+            isUsingTilt = false
+            TiltMotion.shared.stop()
+        }
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -229,6 +245,10 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         node.userData = NSMutableDictionary()
         node.userData?["level"] = level
         node.zPosition = 5
+        let textureIndex = min(level, textures.count - 1)
+        if textureIndex < rareEffects.count, let effect = rareEffects[textureIndex] {
+            node.shader = rareShaders.shader(for: effect)
+        }
 
         let shadow = SKSpriteNode(texture: texture, size: node.size)
         shadow.color = .black
@@ -516,6 +536,9 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
 
     override func update(_ currentTime: TimeInterval) {
         sceneTime = currentTime
+        if isUsingTilt {
+            rareShaders.updateTilt(TiltMotion.shared.tilt(at: currentTime))
+        }
         guard !isGameFinished, !isPaused else { return }
 
         var hasOverflow = false

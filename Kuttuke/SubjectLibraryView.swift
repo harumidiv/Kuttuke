@@ -18,12 +18,14 @@ struct SubjectLibraryView: View {
     @State private var dropTargetAssetID: UUID?
     @State private var isConfirmingStageDeletion = false
     @StateObject private var soundDraft: StageSoundDraft
+    @State private var rareEffects: [UUID: RareEffect]
 
     init(library: SubjectLibrary, stage: GameStage? = nil) {
         self.library = library
         self.stage = stage
         _stageName = State(initialValue: stage?.name ?? "")
         _selectedAssetIDs = State(initialValue: stage?.assetIDs ?? [])
+        _rareEffects = State(initialValue: stage?.rareEffects ?? [:])
         var savedSoundURLs: [UUID: URL] = [:]
         if let stage {
             for assetID in stage.assetIDs {
@@ -206,6 +208,7 @@ struct SubjectLibraryView: View {
             Image(uiImage: asset.image)
                 .resizable()
                 .scaledToFit()
+                .rareEffect(rareEffects[asset.id])
                 .frame(width: 48, height: 48)
                 .padding(3)
                 .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -443,7 +446,8 @@ struct SubjectLibraryView: View {
             MergeSoundSettingsView(
                 library: library,
                 assetIDs: selectedAssetIDs,
-                soundDraft: soundDraft
+                soundDraft: soundDraft,
+                rareEffects: $rareEffects
             )
         } label: {
             HStack(spacing: 12) {
@@ -455,7 +459,7 @@ struct SubjectLibraryView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("高度な詳細設定")
                         .font(.system(size: 15, weight: .black, design: .rounded))
-                    Text("進化したときの音を素材ごとに設定")
+                    Text("進化音とキラ加工を素材ごとに設定")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(KuttukeTheme.secondaryText)
                 }
@@ -561,7 +565,8 @@ struct SubjectLibraryView: View {
             id: stage?.id,
             name: stageName,
             assetIDs: selectedAssetIDs,
-            soundChanges: soundDraft.changes
+            soundChanges: soundDraft.changes,
+            rareEffects: rareEffects
         ) != nil else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         dismiss()

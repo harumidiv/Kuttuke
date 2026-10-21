@@ -58,6 +58,8 @@ struct ReceivedStage {
     let images: [UIImage]
     /// レベル順の進化音（一時フォルダ）。nilは未設定
     let soundURLs: [URL?]
+    /// レベル順のキラ加工。nilは加工なし
+    let rareEffects: [RareEffect?]
 
     var hasSounds: Bool { soundURLs.contains { $0 != nil } }
 
@@ -119,7 +121,7 @@ final class StageShareService {
     private init() {}
 
     /// ステージをアップロードして共有コードを返す。前回のコードがあれば同じコードの内容を最新にする
-    func upload(name: String, imageURLs: [URL], soundURLs: [URL?], existingCode: String?) async throws -> String {
+    func upload(name: String, imageURLs: [URL], soundURLs: [URL?], rareEffects: [RareEffect?], existingCode: String?) async throws -> String {
         guard imageURLs.count >= SubjectLibrary.minimumPlayableItems else { throw StageShareError.notPlayable }
         do {
             guard try await container.accountStatus() == .available else { throw StageShareError.notSignedIn }
@@ -131,7 +133,7 @@ final class StageShareService {
 
         if let existingCode {
             do {
-                try await save(code: existingCode, name: name, imageURLs: imageURLs, soundURLs: soundURLs, overwrite: true)
+                try await save(code: existingCode, name: name, imageURLs: imageURLs, soundURLs: soundURLs, rareEffects: rareEffects, overwrite: true)
                 return existingCode
             } catch let error as CKError where error.code == .permissionFailure || error.code == .serverRecordChanged {
                 // 別のiCloudアカウントで共有したコードなど、上書きできない場合は新しいコードにする
@@ -144,7 +146,7 @@ final class StageShareService {
         for _ in 0..<3 {
             let code = StageShareCode.generate()
             do {
-                try await save(code: code, name: name, imageURLs: imageURLs, soundURLs: soundURLs, overwrite: false)
+                try await save(code: code, name: name, imageURLs: imageURLs, soundURLs: soundURLs, rareEffects: rareEffects, overwrite: false)
                 return code
             } catch let error as CKError where error.code == .serverRecordChanged {
                 continue
@@ -174,6 +176,7 @@ final class StageShareService {
         var imageData: [Data] = []
         var images: [UIImage] = []
         var soundURLs: [URL?] = []
+        var rareEffects: [RareEffect?] = []
         do {
             for index in 0..<Int(count) {
                 guard let url = (record["image\(index)"] as? CKAsset)?.fileURL,
@@ -194,6 +197,8 @@ final class StageShareService {
                 } else {
                     soundURLs.append(nil)
                 }
+                // 知らない種類（新しいバージョンで増えた加工）は加工なしとして受け取る
+                rareEffects.append((record["effect\(index)"] as? String).flatMap(RareEffect.init(rawValue:)))
             }
         } catch {
             soundURLs.compactMap { $0 }.forEach { try? FileManager.default.removeItem(at: $0) }
@@ -205,7 +210,8 @@ final class StageShareService {
             name: (record["name"] as? String) ?? String(localized: "もらったステージ"),
             imageData: imageData,
             images: images,
-            soundURLs: soundURLs
+            soundURLs: soundURLs,
+            rareEffects: rareEffects
         )
     }
 
@@ -220,7 +226,7 @@ final class StageShareService {
         }
     }
 
-    private func save(code: String, name: String, imageURLs: [URL], soundURLs: [URL?], overwrite: Bool) async throws {
+    private func save(code: String, name: String, imageURLs: [URL], soundURLs: [URL?], rareEffects: [RareEffect?], overwrite: Bool) async throws {
         let record = CKRecord(recordType: Self.recordType, recordID: CKRecord.ID(recordName: code))
         record["version"] = Self.formatVersion
         record["name"] = name
@@ -231,6 +237,8 @@ final class StageShareService {
                 record["sound\(index)"] = CKAsset(fileURL: soundURL)
                 record["soundExt\(index)"] = soundURL.pathExtension
             }
+            // 上書き共有で加工を外したときに前回の値が残らないよう、加工なしも空文字で書き込む
+            record["effect\(index)"] = index < rareEffects.count ? rareEffects[index]?.rawValue ?? "" : ""
         }
 
         let (saveResults, _) = try await database.modifyRecords(

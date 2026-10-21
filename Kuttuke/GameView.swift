@@ -9,6 +9,8 @@ final class GameViewModel: ObservableObject {
     let images: [UIImage]
     /// 進化の列に並べる、透明な余白を除いた素材
     let evolutionImages: [UIImage]
+    /// `images` と同じ並びのキラ加工
+    let rareEffects: [RareEffect?]
     @Published var score = 0
     @Published var bestScore: Int
     @Published var nextLevels = [0, 0, 0]
@@ -29,16 +31,17 @@ final class GameViewModel: ObservableObject {
     private let mergeSound: MergeSoundPlayer
     private let gameOverFeedback = UINotificationFeedbackGenerator()
 
-    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?]) {
+    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?], rareEffects: [RareEffect?]) {
         self.mergeSound = MergeSoundPlayer(urls: mergeSoundURLs)
         let bestScoreKey = "kuttuke.best-score.\(stageID.uuidString)"
         self.images = images
         self.evolutionImages = images.map(SubjectExtractor.trimmedToContent)
+        self.rareEffects = rareEffects
         self.bestScoreKey = bestScoreKey
         let savedBestScore = UserDefaults.standard.integer(forKey: bestScoreKey)
         self.bestScore = savedBestScore
         self.bestScoreAtStart = savedBestScore
-        self.scene = DropGameScene(images: images)
+        self.scene = DropGameScene(images: images, rareEffects: rareEffects)
         connectScene()
     }
 
@@ -91,6 +94,12 @@ final class GameViewModel: ObservableObject {
     func image(for level: Int) -> UIImage? {
         guard !images.isEmpty else { return nil }
         return images[min(level, images.count - 1)]
+    }
+
+    func rareEffect(for level: Int) -> RareEffect? {
+        guard !images.isEmpty else { return nil }
+        let index = min(level, images.count - 1)
+        return index < rareEffects.count ? rareEffects[index] : nil
     }
 
     private func connectScene() {
@@ -147,9 +156,15 @@ struct GameView: View {
         stageID: UUID,
         stageName: String,
         mergeSoundURLs: [URL?] = [],
+        rareEffects: [RareEffect?] = [],
         onExit: @escaping () -> Void
     ) {
-        _model = StateObject(wrappedValue: GameViewModel(images: images, stageID: stageID, mergeSoundURLs: mergeSoundURLs))
+        _model = StateObject(wrappedValue: GameViewModel(
+            images: images,
+            stageID: stageID,
+            mergeSoundURLs: mergeSoundURLs,
+            rareEffects: rareEffects
+        ))
         self.stageName = stageName
         self.onExit = onExit
     }
@@ -233,6 +248,7 @@ struct GameView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
+                        .rareEffect(model.rareEffect(for: level))
                         .frame(width: index == 0 ? 30 : 24, height: index == 0 ? 30 : 24)
                         .opacity(index == 0 ? 1 : 0.68)
                 }
@@ -288,6 +304,7 @@ struct GameView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
+                        .rareEffect(model.rareEffect(for: index))
                         // 余白を除いた素材を枠の下端に置き、すべての素材の底を揃える
                         .frame(width: sides[index], height: sides[index], alignment: .bottom)
                         .accessibilityLabel("進化レベル \(index + 1)")

@@ -56,12 +56,14 @@ struct StageShareView: View {
 
     private func stageHeader(_ stage: GameStage) -> some View {
         let images = library.images(for: stage)
+        let rareEffects = library.rareEffects(for: stage)
         return VStack(spacing: 10) {
             HStack(spacing: -10) {
-                ForEach(Array(images.prefix(6).enumerated()), id: \.offset) { _, image in
+                ForEach(Array(images.prefix(6).enumerated()), id: \.offset) { index, image in
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
+                        .rareEffect(rareEffects[index])
                         .frame(width: 46, height: 46)
                         .padding(3)
                         .background(KuttukeTheme.cream, in: Circle())
@@ -232,6 +234,7 @@ struct StageShareView: View {
                     name: stage.name,
                     imageURLs: library.imageFileURLs(for: stage),
                     soundURLs: library.mergeSoundURLs(for: stage),
+                    rareEffects: library.rareEffects(for: stage),
                     existingCode: stage.shareCode
                 )
                 library.markShared(stageID: stage.id, code: code, at: startedAt)
@@ -372,10 +375,11 @@ struct StageReceiveView: View {
             }
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                ForEach(Array(received.images.enumerated()), id: \.offset) { _, image in
+                ForEach(Array(received.images.enumerated()), id: \.offset) { index, image in
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
+                        .rareEffect(received.rareEffects[index])
                         .padding(6)
                         .aspectRatio(1, contentMode: .fit)
                         .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
