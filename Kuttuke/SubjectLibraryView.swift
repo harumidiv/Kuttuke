@@ -43,12 +43,10 @@ struct SubjectLibraryView: View {
                 ScrollView {
                     VStack(spacing: 18) {
                         nameCard
+                        // 進化順や素材の一覧は長くなるため、その下に置くと見つけにくい。開いてすぐ見える位置に置く
+                        advancedSettings
                         progression
                         assetLibrary
-                        advancedSettings
-                        if stage != nil {
-                            deleteStageButton
-                        }
                     }
                     .padding(20)
                     .padding(.bottom, 30)
@@ -124,9 +122,31 @@ struct SubjectLibraryView: View {
 
     private var nameCard: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Label("ステージ名", systemImage: "rectangle.and.pencil.and.ellipsis")
-                .font(.system(size: 13, weight: .black, design: .rounded))
-                .foregroundStyle(KuttukeTheme.secondaryText)
+            HStack {
+                Label("ステージ名", systemImage: "rectangle.and.pencil.and.ellipsis")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundStyle(KuttukeTheme.secondaryText)
+                Spacer()
+                if stage != nil {
+                    // 削除は画面の一番下だと見つけにくいため、最初に目に入るカードに置く（押すと確認が出る）
+                    Button(role: .destructive) {
+                        isConfirmingStageDeletion = true
+                    } label: {
+                        Label("削除", systemImage: "trash")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 11)
+                            .frame(height: 30)
+                            .background(Color.red.opacity(0.08), in: Capsule())
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(library.isProcessing || isLoadingPhoto)
+                    .accessibilityLabel("このステージを削除")
+                }
+            }
+            .frame(height: 30)
 
             TextField("例：うちの猫", text: $stageName)
                 .font(.system(size: 20, weight: .bold, design: .rounded))
@@ -208,7 +228,7 @@ struct SubjectLibraryView: View {
             Image(uiImage: asset.image)
                 .resizable()
                 .scaledToFit()
-                .rareEffect(rareEffects[asset.id])
+                .rareEffect(rareEffects[asset.id], image: asset.image)
                 .frame(width: 48, height: 48)
                 .padding(3)
                 .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -475,22 +495,6 @@ struct SubjectLibraryView: View {
         .buttonStyle(BouncyButtonStyle())
         .disabled(selectedAssetIDs.count < 2)
         .opacity(selectedAssetIDs.count < 2 ? 0.45 : 1)
-    }
-
-    private var deleteStageButton: some View {
-        Button(role: .destructive) {
-            isConfirmingStageDeletion = true
-        } label: {
-            Label("このステージを削除", systemImage: "trash")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.red)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(.white, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-        }
-        .buttonStyle(BouncyButtonStyle())
-        .disabled(library.isProcessing || isLoadingPhoto)
-        .padding(.top, 6)
     }
 
     private var processingOverlay: some View {

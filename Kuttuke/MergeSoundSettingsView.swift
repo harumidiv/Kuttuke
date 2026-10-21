@@ -68,7 +68,7 @@ struct MergeSoundSettingsView: View {
                 Image(uiImage: asset.image)
                     .resizable()
                     .scaledToFit()
-                    .rareEffect(rareEffects[asset.id])
+                    .rareEffect(rareEffects[asset.id], image: asset.image)
                     .frame(width: 64, height: 64)
                     .padding(4)
                     .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -188,21 +188,48 @@ struct MergeSoundSettingsView: View {
     private func effectSection(_ asset: SubjectAsset, level: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("キラ加工", systemImage: "sparkles")
-            Picker("レベル\(level + 1)のキラ加工", selection: effectBinding(for: asset.id)) {
-                Text("なし").tag(RareEffect?.none)
-                ForEach(RareEffect.allCases) { effect in
-                    Text(effect.title).tag(RareEffect?.some(effect))
+            // 種類が多いため、横にスクロールして選ぶ。開いたときは選んでいる加工が見える位置にする
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        effectChip(String(localized: "なし"), effect: nil, assetID: asset.id)
+                        ForEach(RareEffect.allCases) { effect in
+                            effectChip(effect.title, effect: effect, assetID: asset.id)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 14)
                 }
+                .scrollIndicators(.hidden)
+                // カードの端まで広げ、続きがあることが分かるようにする
+                .padding(.horizontal, -14)
+                .onAppear { proxy.scrollTo(chipID(rareEffects[asset.id]), anchor: .center) }
             }
-            .pickerStyle(.segmented)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("レベル\(level + 1)のキラ加工")
         }
     }
 
-    private func effectBinding(for assetID: UUID) -> Binding<RareEffect?> {
-        Binding(
-            get: { rareEffects[assetID] },
-            set: { rareEffects[assetID] = $0 }
-        )
+    private func effectChip(_ title: String, effect: RareEffect?, assetID: UUID) -> some View {
+        let isSelected = rareEffects[assetID] == effect
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { rareEffects[assetID] = effect }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(isSelected ? .white : KuttukeTheme.ink)
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .background(isSelected ? KuttukeTheme.ink : KuttukeTheme.cream, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .id(chipID(effect))
+    }
+
+    private func chipID(_ effect: RareEffect?) -> String {
+        effect?.rawValue ?? "none"
     }
 
     private func statusText(for assetID: UUID, isFirstLevel: Bool, isRecording: Bool) -> String {

@@ -186,8 +186,8 @@ struct GameView: View {
                 }
                 .padding(.horizontal, 15)
                 .padding(.top, 8)
-                // 盤面とバナーの間に余白を取り、ドロップ操作での誤タップを防ぐ
-                .padding(.bottom, 24)
+                // 盤面とバナーの間には進化の列があるため、列とバナーの間は詰める
+                .padding(.bottom, 4)
 
                 BannerAdView()
                     .frame(width: BannerAdView.size.width, height: BannerAdView.size.height)
@@ -248,7 +248,7 @@ struct GameView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .rareEffect(model.rareEffect(for: level))
+                        .rareEffect(model.rareEffect(for: level), image: image)
                         .frame(width: index == 0 ? 30 : 24, height: index == 0 ? 30 : 24)
                         .opacity(index == 0 ? 1 : 0.68)
                 }
@@ -283,7 +283,7 @@ struct GameView: View {
     }
 
     /// 進化列の高さ（最大レベルの素材の大きさ + 上下の余白）
-    private static let evolutionRowHeight: CGFloat = 50
+    private static let evolutionRowHeight: CGFloat = 70
     /// 進化列の素材と背景の間の余白
     private static let evolutionRowInset: CGFloat = 3
 
@@ -304,7 +304,7 @@ struct GameView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .rareEffect(model.rareEffect(for: index))
+                        .rareEffect(model.rareEffect(for: index), image: image)
                         // 余白を除いた素材を枠の下端に置き、すべての素材の底を揃える
                         .frame(width: sides[index], height: sides[index], alignment: .bottom)
                         .accessibilityLabel("進化レベル \(index + 1)")
@@ -336,7 +336,8 @@ struct GameView: View {
                 evolutionRow
                     .frame(width: boardWidth, height: rowHeight)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            // 余った高さは上に回し、進化の列とバナーの間を端末によらず一定にする
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
     }
 
