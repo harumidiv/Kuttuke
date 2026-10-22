@@ -19,7 +19,8 @@ struct ContentView: View {
                     images: library.images(for: stage),
                     stageID: stage.id,
                     stageName: stage.name,
-                    mergeSoundURLs: library.mergeSoundURLs(for: stage)
+                    mergeSoundURLs: library.mergeSoundURLs(for: stage),
+                    rareEffects: library.rareEffects(for: stage)
                 ) {
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
                         playingStageID = nil
@@ -216,7 +217,7 @@ struct ContentView: View {
         let remainingCount = max(0, SubjectLibrary.minimumPlayableItems - images.count)
         return VStack(spacing: 12) {
             HStack(spacing: 14) {
-                stageThumbnail(images)
+                stageThumbnail(stage, images: images)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(stage.name)
@@ -281,8 +282,12 @@ struct ContentView: View {
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(.black.opacity(0.055)))
     }
 
-    private func stageThumbnail(_ images: [UIImage]) -> some View {
-        ZStack {
+    private static let thumbnailSide: CGFloat = 82
+
+    /// ステージで使っている素材を、サムネイルの中にステッカーのように散らして貼る
+    private func stageThumbnail(_ stage: GameStage, images: [UIImage]) -> some View {
+        let placements = StageThumbnailLayout.placements(count: images.count, seed: stage.id, side: Self.thumbnailSide)
+        return ZStack {
             RoundedRectangle(cornerRadius: 19, style: .continuous)
                 .fill(KuttukeTheme.cream)
 
@@ -291,18 +296,83 @@ struct ContentView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(KuttukeTheme.secondaryText.opacity(0.5))
             } else {
-                ForEach(Array(images.prefix(3).enumerated()), id: \.offset) { index, image in
-                    Image(uiImage: image)
+                // 大きい（レベルの高い）素材から先に描き、小さい素材が隠れにくいようにする
+                ForEach(Array(zip(images, placements).enumerated()).reversed(), id: \.offset) { _, item in
+                    let (image, placement) = item
+                    Image(uiImage: ThumbnailCache.thumbnail(for: image))
                         .resizable()
                         .scaledToFit()
-                        .frame(width: CGFloat(42 + index * 6), height: CGFloat(42 + index * 6))
-                        .offset(x: CGFloat(index - 1) * 12, y: CGFloat(1 - index) * 3)
+                        .frame(width: placement.size, height: placement.size)
+                        .rotationEffect(.degrees(placement.rotation))
+                        .position(placement.center)
                 }
             }
         }
-        .frame(width: 82, height: 82)
+        .frame(width: Self.thumbnailSide, height: Self.thumbnailSide)
+        .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
     }
 
+}
+
+/// サムネイルに散らして貼る位置。ステージのIDから乱数を作るため、同じステージはいつも同じ配置になる
+private enum StageThumbnailLayout {
+    struct Placement {
+        let center: CGPoint
+        let size: CGFloat
+        let rotation: Double
+    }
+
+    static func placements(count: Int, seed: UUID, side: CGFloat) -> [Placement] {
+        var random = SeededRandom(seed: seed)
+        return (0..<count).map { level in
+            // レベルが高いほど少し大きく貼る
+            let progress = count > 1 ? CGFloat(level) / CGFloat(count - 1) : 1
+            let size = side * (0.38 + 0.2 * progress)
+            // 素材の画像は周りに余白があるため、少しだけ枠からはみ出してもよい
+            let margin = size * 0.4
+            let center = CGPoint(
+                x: CGFloat.random(in: margin...(side - margin), using: &random),
+                y: CGFloat.random(in: margin...(side - margin), using: &random)
+            )
+            return Placement(center: center, size: size, rotation: Double.random(in: -18...18, using: &random))
+        }
+    }
+}
+
+/// ステージのIDから作る乱数（SplitMix64）。起動のたびに配置が変わらないよう、Swift標準のハッシュ値は使わない
+private struct SeededRandom: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UUID) {
+        let bytes = withUnsafeBytes(of: seed.uuid) { Array($0) }
+        state = bytes.prefix(8).reduce(0) { $0 << 8 | UInt64($1) } ^ bytes.suffix(8).reduce(0) { $0 << 8 | UInt64($1) }
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var value = state
+        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+        return value ^ (value >> 31)
+    }
+}
+
+/// ホームのサムネイル用に縮めた素材。元の512pxのまま並べるとメモリを多く使うため
+private enum ThumbnailCache {
+    private static let cache = NSCache<UIImage, UIImage>()
+    private static let pixelSize: CGFloat = 160
+
+    static func thumbnail(for image: UIImage) -> UIImage {
+        if let cached = cache.object(forKey: image) { return cached }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let size = CGSize(width: pixelSize, height: pixelSize)
+        let thumbnail = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        cache.setObject(thumbnail, forKey: image)
+        return thumbnail
+    }
 }
 
 private struct StageEditorRoute: Identifiable {

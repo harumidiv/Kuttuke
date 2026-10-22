@@ -1,4 +1,5 @@
 import SpriteKit
+import simd
 import UIKit
 
 final class DropGameScene: SKScene, SKPhysicsContactDelegate {
@@ -25,6 +26,20 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     // 当たり判定用の低解像度テクスチャ。輪郭の頂点数を減らし、アイテムが増えても衝突計算を軽くする
     private let physicsTextures: [SKTexture]
     private static let physicsTexturePixelSize: CGFloat = 64
+    /// レベルごとのキラ加工。nilは加工なし
+    private let rareEffects: [RareEffect?]
+    private let rareShaders = RareEffectSpriteShaders()
+    private var isUsingTilt = false
+    /// 水入りの素材の形（気泡を絵の内側に収めるため）。水入りでないレベルはnil
+    private let bubbleMasks: [BubbleMask?]
+    private let bubblesKey = "bubbles"
+    private let snowKey = "snow"
+    private let googlyKey = "googly"
+    private let lastVelocityKey = "lastVelocity"
+    /// ぎょろ目の素材（目の位置を探す元の画像）と、見つかった目の位置
+    private let googlyImages: [Int: UIImage]
+    private var googlyLayouts: [Int: GooglyEyeLayout] = [:]
+    private var lastMotionTime: TimeInterval?
     private let itemCategory: UInt32 = 1 << 0
     private let wallCategory: UInt32 = 1 << 1
     private var currentNode: SKSpriteNode?
@@ -48,7 +63,16 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     private let dangerLineName = "danger-line"
     private let boardInset: CGFloat = 11
 
-    init(images: [UIImage]) {
+    init(images: [UIImage], rareEffects: [RareEffect?] = []) {
+        self.rareEffects = rareEffects
+        bubbleMasks = images.enumerated().map { index, image in
+            index < rareEffects.count && rareEffects[index] == .water ? BubbleMask.cached(for: image) : nil
+        }
+        var googlyImages: [Int: UIImage] = [:]
+        for (index, image) in images.enumerated() where index < rareEffects.count && rareEffects[index] == .googlyEyes {
+            googlyImages[index] = image
+        }
+        self.googlyImages = googlyImages
         textures = images.map {
             let texture = SKTexture(image: $0)
             texture.filteringMode = .linear
@@ -73,7 +97,19 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         buildBoard()
         warmUpPhysicsBodies()
         warmUpScoreLabelFont()
+        if rareEffects.contains(where: { $0 != nil }), !isUsingTilt {
+            isUsingTilt = true
+            TiltMotion.shared.start()
+        }
+        detectGooglyEyes()
         prepareNextRound()
+    }
+
+    override func willMove(from view: SKView) {
+        if isUsingTilt {
+            isUsingTilt = false
+            TiltMotion.shared.stop()
+        }
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -229,6 +265,26 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         node.userData = NSMutableDictionary()
         node.userData?["level"] = level
         node.zPosition = 5
+        let textureIndex = min(level, textures.count - 1)
+        if textureIndex < rareEffects.count, let effect = rareEffects[textureIndex] {
+            node.shader = rareShaders.shader(for: effect)
+        }
+        if let mask = bubbleMasks[textureIndex] {
+            let bubbles = BubbleSimulation(mask: mask)
+            node.userData?[bubblesKey] = bubbles
+            RareEffectSpriteShaders.applyBubbles(bubbles.positions, to: node)
+        }
+        if textureIndex < rareEffects.count, rareEffects[textureIndex] == .snowGlobe {
+            let snow = SnowDrift()
+            node.userData?[snowKey] = snow
+            RareEffectSpriteShaders.applySnow(snow, to: node)
+        }
+        if googlyImages[textureIndex] != nil {
+            let eyes = GooglyEyesSimulation()
+            eyes.layout = googlyLayouts[textureIndex]
+            node.userData?[googlyKey] = eyes
+            RareEffectSpriteShaders.applyEyes(eyes, to: node)
+        }
 
         let shadow = SKSpriteNode(texture: texture, size: node.size)
         shadow.color = .black
@@ -516,6 +572,10 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
 
     override func update(_ currentTime: TimeInterval) {
         sceneTime = currentTime
+        if isUsingTilt {
+            rareShaders.updateTilt(TiltMotion.shared.tilt(at: currentTime))
+            updateMotionEffects(at: currentTime)
+        }
         guard !isGameFinished, !isPaused else { return }
 
         var hasOverflow = false
@@ -546,6 +606,62 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
             overflowStartedAt = nil
             self.lastOverflowAt = nil
             setDangerWarning(false)
+        }
+    }
+
+    /// 目の位置の検出（Vision）は時間がかかるため裏で行い、見つかったら盤面のアイテムにも反映する
+    private func detectGooglyEyes() {
+        for (index, image) in googlyImages where googlyLayouts[index] == nil {
+            Task { [weak self] in
+                let layout = await GooglyEyeDetector.layout(for: image)
+                self?.googlyLayouts[index] = layout
+            }
+        }
+    }
+
+    /// 気泡・雪・ぎょろ目を進める。アイテムは転がって回転するため、回転を差し引いて実際の重力の向きで動かす
+    private func updateMotionEffects(at time: TimeInterval) {
+        let dt = CGFloat(min(max(time - (lastMotionTime ?? time), 0), 1.0 / 20))
+        lastMotionTime = time
+        let rise = TiltMotion.shared.rise(at: time)
+        let shake = TiltMotion.shared.shake(at: time)
+        for case let node as SKSpriteNode in children {
+            let angle = Float(node.zRotation)
+            // uv（y下向き）の向きを、アイテムの回転に合わせてアイテム自身のuvへ直す
+            func local(_ vector: SIMD2<Float>) -> SIMD2<Float> {
+                let scene = SIMD2(vector.x, -vector.y)
+                let rotated = SIMD2(
+                    scene.x * cos(angle) + scene.y * sin(angle),
+                    -scene.x * sin(angle) + scene.y * cos(angle)
+                )
+                return SIMD2(rotated.x, -rotated.y)
+            }
+            if let bubbles = node.userData?[bubblesKey] as? BubbleSimulation {
+                bubbles.step(rise: local(rise), time: time)
+                RareEffectSpriteShaders.applyBubbles(bubbles.positions, to: node)
+            }
+            if let snow = node.userData?[snowKey] as? SnowDrift {
+                snow.step(fall: local(-rise), shake: local(shake), time: time)
+                RareEffectSpriteShaders.applySnow(snow, to: node)
+            }
+            if let eyes = node.userData?[googlyKey] as? GooglyEyesSimulation {
+                if eyes.layout == nil, let layout = googlyLayouts[min(level(of: node), textures.count - 1)] {
+                    eyes.layout = layout
+                }
+                // ぶつかったり落ちたりしてアイテムの速さが変わると、黒目が取り残されて跳ねる
+                let velocity = node.physicsBody?.velocity ?? .zero
+                var jolt = SIMD2<Float>.zero
+                if dt > 0, let last = node.userData?[lastVelocityKey] as? CGVector {
+                    let side = max(node.size.width, 1)
+                    let acceleration = SIMD2(Float((velocity.dx - last.dx) / dt / side), Float(-(velocity.dy - last.dy) / dt / side))
+                    jolt = local(acceleration) * 0.03
+                    let length = simd_length(jolt)
+                    if length > 6 { jolt *= 6 / length }
+                }
+                node.userData?[lastVelocityKey] = velocity
+                eyes.step(fall: local(-rise), jolt: jolt + local(shake), time: time)
+                RareEffectSpriteShaders.applyEyes(eyes, to: node)
+            }
         }
     }
 

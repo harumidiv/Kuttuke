@@ -1,11 +1,12 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 高度な詳細設定：進化の順番に並んだ素材ごとに、その素材へ進化したときの音を設定する
+/// 高度な詳細設定：進化の順番に並んだ素材ごとに、その素材へ進化したときの音とキラ加工を設定する
 struct MergeSoundSettingsView: View {
     @ObservedObject var library: SubjectLibrary
     let assetIDs: [UUID]
     @ObservedObject var soundDraft: StageSoundDraft
+    @Binding var rareEffects: [UUID: RareEffect]
 
     @State private var importingAssetID: UUID?
 
@@ -16,9 +17,12 @@ struct MergeSoundSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("進化したときの音")
+                        Text("素材ごとの設定")
                             .font(.system(size: 17, weight: .black, design: .rounded))
                         Text("合体してその素材に進化したときに鳴ります。録音は最大\(Int(StageSoundDraft.maximumRecordingDuration))秒、ファイルは\(Int(StageSoundDraft.maximumFileDuration))秒以内です。未設定の素材では標準の「ぽよん」が鳴ります。編集画面で「保存」すると反映されます。")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(KuttukeTheme.secondaryText)
+                        Text("キラ加工はレアカードのような加工で、端末を傾けると光が動きます。")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(KuttukeTheme.secondaryText)
                     }
@@ -26,7 +30,7 @@ struct MergeSoundSettingsView: View {
 
                     ForEach(Array(assetIDs.enumerated()), id: \.element) { index, assetID in
                         if let asset = library.asset(withID: assetID) {
-                            soundRow(asset, level: index)
+                            assetCard(asset, level: index)
                         }
                     }
                 }
@@ -55,28 +59,58 @@ struct MergeSoundSettingsView: View {
         .onDisappear { soundDraft.stopPreview() }
     }
 
+    /// 1つの素材の設定をまとめたカード。素材を見ながら音とキラ加工を続けて設定できるようにする
+    private func assetCard(_ asset: SubjectAsset, level: Int) -> some View {
+        let isRecordingThis = soundDraft.recordingAssetID == asset.id
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(uiImage: asset.image)
+                    .resizable()
+                    .scaledToFit()
+                    .rareEffect(rareEffects[asset.id], image: asset.image)
+                    .frame(width: 64, height: 64)
+                    .padding(4)
+                    .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                Text("レベル \(level + 1)")
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+            }
+
+            soundSection(asset, level: level)
+
+            Divider()
+
+            effectSection(asset, level: level)
+        }
+        .padding(14)
+        .background(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(isRecordingThis ? Color.red : .clear, lineWidth: 2)
+        )
+    }
+
+    private func sectionLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 12, weight: .black, design: .rounded))
+            .foregroundStyle(KuttukeTheme.secondaryText)
+    }
+
     @ViewBuilder
-    private func soundRow(_ asset: SubjectAsset, level: Int) -> some View {
+    private func soundSection(_ asset: SubjectAsset, level: Int) -> some View {
         let isRecordingThis = soundDraft.recordingAssetID == asset.id
         let soundURL = soundDraft.url(for: asset.id)
         // レベル1は最初の姿で、合体して現れることがないため音は鳴らない
         let isFirstLevel = level == 0
 
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Image(uiImage: asset.image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 44, height: 44)
-                    .padding(3)
-                    .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("レベル \(level + 1)")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
+                    sectionLabel("進化音", systemImage: "speaker.wave.2.fill")
                     Text(statusText(for: asset.id, isFirstLevel: isFirstLevel, isRecording: isRecordingThis))
                         .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(isRecordingThis ? .red : KuttukeTheme.secondaryText)
+                        .foregroundStyle(isRecordingThis ? .red : KuttukeTheme.ink)
                         .monospacedDigit()
                 }
 
@@ -149,12 +183,53 @@ struct MergeSoundSettingsView: View {
                 .opacity(soundDraft.isRecording && !isRecordingThis ? 0.4 : 1)
             }
         }
-        .padding(14)
-        .background(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(isRecordingThis ? Color.red : .clear, lineWidth: 2)
-        )
+    }
+
+    private func effectSection(_ asset: SubjectAsset, level: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("キラ加工", systemImage: "sparkles")
+            // 種類が多いため、横にスクロールして選ぶ。開いたときは選んでいる加工が見える位置にする
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        effectChip(String(localized: "なし"), effect: nil, assetID: asset.id)
+                        ForEach(RareEffect.allCases) { effect in
+                            effectChip(effect.title, effect: effect, assetID: asset.id)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 14)
+                }
+                .scrollIndicators(.hidden)
+                // カードの端まで広げ、続きがあることが分かるようにする
+                .padding(.horizontal, -14)
+                .onAppear { proxy.scrollTo(chipID(rareEffects[asset.id]), anchor: .center) }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("レベル\(level + 1)のキラ加工")
+        }
+    }
+
+    private func effectChip(_ title: String, effect: RareEffect?, assetID: UUID) -> some View {
+        let isSelected = rareEffects[assetID] == effect
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { rareEffects[assetID] = effect }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(isSelected ? .white : KuttukeTheme.ink)
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .background(isSelected ? KuttukeTheme.ink : KuttukeTheme.cream, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .id(chipID(effect))
+    }
+
+    private func chipID(_ effect: RareEffect?) -> String {
+        effect?.rawValue ?? "none"
     }
 
     private func statusText(for assetID: UUID, isFirstLevel: Bool, isRecording: Bool) -> String {

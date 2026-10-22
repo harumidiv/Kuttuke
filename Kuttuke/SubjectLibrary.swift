@@ -25,6 +25,8 @@ struct GameStage: Identifiable, Codable, Hashable {
     var updatedAt: Date
     /// 素材ごとの進化音（その素材に進化したときに鳴らす音声ファイル名）。未設定の素材は標準の音（poyon.wav）を鳴らす
     var mergeSoundFileNames: [UUID: String]?
+    /// 素材ごとのキラ加工（`RareEffect` のrawValue）。新しい種類を知らない古いアプリでも読み込めるよう文字列で持つ
+    var rareEffectNames: [UUID: String]?
     /// 友達に共有したときのコード（CloudKitのレコード名）。未共有ならnil
     var shareCode: String?
     var sharedAt: Date?
@@ -33,6 +35,18 @@ struct GameStage: Identifiable, Codable, Hashable {
     var needsShareUpload: Bool {
         guard shareCode != nil, let sharedAt else { return true }
         return updatedAt > sharedAt
+    }
+
+    func rareEffect(for assetID: UUID) -> RareEffect? {
+        rareEffectNames?[assetID].flatMap(RareEffect.init(rawValue:))
+    }
+
+    var rareEffects: [UUID: RareEffect] {
+        var effects: [UUID: RareEffect] = [:]
+        for assetID in assetIDs {
+            effects[assetID] = rareEffect(for: assetID)
+        }
+        return effects
     }
 }
 
@@ -87,6 +101,13 @@ final class SubjectLibrary: ObservableObject {
         stage.assetIDs
             .filter { asset(withID: $0) != nil }
             .map { mergeSoundURL(for: stage, assetID: $0) }
+    }
+
+    /// `images(for:)` と同じ並びのキラ加工
+    func rareEffects(for stage: GameStage) -> [RareEffect?] {
+        stage.assetIDs
+            .filter { asset(withID: $0) != nil }
+            .map { stage.rareEffect(for: $0) }
     }
 
     /// `images(for:)` と同じ並びの画像ファイル
@@ -158,7 +179,8 @@ final class SubjectLibrary: ObservableObject {
         id: UUID?,
         name: String,
         assetIDs: [UUID],
-        soundChanges: [UUID: MergeSoundChange] = [:]
+        soundChanges: [UUID: MergeSoundChange] = [:],
+        rareEffects: [UUID: RareEffect]? = nil
     ) -> UUID? {
         let validIDs = uniqueValidAssetIDs(from: assetIDs)
         guard !validIDs.isEmpty else {
@@ -185,6 +207,13 @@ final class SubjectLibrary: ObservableObject {
             }
         }
 
+        // nilなら今の設定のまま。ステージから外した素材の分は残さない
+        let effectSource = rareEffects ?? id.flatMap { self.stage(withID: $0) }?.rareEffects ?? [:]
+        var effectNames: [UUID: String] = [:]
+        for assetID in validIDs {
+            effectNames[assetID] = effectSource[assetID]?.rawValue
+        }
+
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let stageName = trimmedName.isEmpty ? String(localized: "ステージ \(stages.count + 1)") : trimmedName
         let now = Date()
@@ -195,6 +224,7 @@ final class SubjectLibrary: ObservableObject {
             stages[index].assetIDs = validIDs
             stages[index].updatedAt = now
             stages[index].mergeSoundFileNames = sounds
+            stages[index].rareEffectNames = effectNames
             guard saveStages() else {
                 stages = previousStages
                 newlyStoredFileNames.forEach(removeMergeSoundFile)
@@ -212,7 +242,8 @@ final class SubjectLibrary: ObservableObject {
             assetIDs: validIDs,
             createdAt: now,
             updatedAt: now,
-            mergeSoundFileNames: sounds
+            mergeSoundFileNames: sounds,
+            rareEffectNames: effectNames
         )
         stages.insert(stage, at: 0)
         guard saveStages() else {
@@ -276,7 +307,17 @@ final class SubjectLibrary: ObservableObject {
         for (asset, soundURL) in zip(newAssets, received.soundURLs) {
             if let soundURL { soundChanges[asset.id] = .replace(soundURL) }
         }
-        guard let stageID = saveStage(id: nil, name: received.name, assetIDs: newAssets.map(\.id), soundChanges: soundChanges) else {
+        var rareEffects: [UUID: RareEffect] = [:]
+        for (asset, effect) in zip(newAssets, received.rareEffects) {
+            rareEffects[asset.id] = effect
+        }
+        guard let stageID = saveStage(
+            id: nil,
+            name: received.name,
+            assetIDs: newAssets.map(\.id),
+            soundChanges: soundChanges,
+            rareEffects: rareEffects
+        ) else {
             let newIDs = Set(newAssets.map(\.id))
             assets.removeAll { newIDs.contains($0.id) }
             newAssets.forEach { try? fileManager.removeItem(at: assetsDirectory.appendingPathComponent($0.fileName)) }
@@ -314,6 +355,7 @@ final class SubjectLibrary: ObservableObject {
             if let soundFileName = stages[index].mergeSoundFileNames?.removeValue(forKey: asset.id) {
                 removeMergeSoundFile(soundFileName)
             }
+            stages[index].rareEffectNames?.removeValue(forKey: asset.id)
             stages[index].updatedAt = now
         }
         saveStages()
