@@ -2,25 +2,58 @@ import simd
 import UIKit
 import Vision
 
-/// スノードームの雪の流れ。重力の向きへゆっくり降り、端末を振ると舞い上がって渦を巻く
-final class SnowDrift {
-    /// 雪の模様を流した量（uv）。シェーダーはこの分だけ模様をずらして描く
-    private(set) var drift = SIMD2<Float>(Float.random(in: 0...10), Float.random(in: 0...10))
-    /// 振ったときの舞い上がり具合（0〜2）。振るのをやめると数秒かけて落ち着く
-    private(set) var agitation: Float = 0
-    private var lastTime: TimeInterval?
+/// 切り抜きの形（不透明な部分）を低解像度で持つ。顔が見つからない素材でぎょろ目を置く位置を決めるために使う
+final class SubjectMask {
+    private static let size = 64
+    private static let cache = NSCache<UIImage, SubjectMask>()
 
-    /// fall: 雪が降る向き（uv、y下向き）。shake: 端末を振った加速度（uv）
-    func step(fall: SIMD2<Float>, shake: SIMD2<Float>, time: TimeInterval) {
-        let dt = Float(min(max(time - (lastTime ?? time), 0), 1.0 / 20))
-        lastTime = time
-        guard dt > 0 else { return }
+    private let alpha: [UInt8]
 
-        agitation = max(agitation * exp(-0.8 * dt), min(simd_length(shake), 2))
-        let calm = 1 - min(agitation, 1) * 0.8
-        let swirlAngle = Float(time) * 2.5
-        let swirl = SIMD2(cos(swirlAngle), sin(swirlAngle)) * agitation * 0.5
-        drift += (fall * 0.12 * calm - fall * agitation * 0.25 + swirl) * dt
+    static func cached(for image: UIImage) -> SubjectMask {
+        if let mask = cache.object(forKey: image) { return mask }
+        let mask = SubjectMask(image: image)
+        cache.setObject(mask, forKey: image)
+        return mask
+    }
+
+    private init(image: UIImage) {
+        let size = Self.size
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        // 画像の向きを正しく反映した状態で縮小する
+        let upright = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format).image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: size, height: size))
+        }
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        if let cgImage = upright.cgImage {
+            pixels.withUnsafeMutableBytes { buffer in
+                let context = CGContext(
+                    data: buffer.baseAddress,
+                    width: size,
+                    height: size,
+                    bitsPerComponent: 8,
+                    bytesPerRow: size * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                )
+                context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
+            }
+        }
+        alpha = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }
+    }
+
+    /// 絵（不透明な部分）を囲む範囲（uv）。何も描かれていなければ全体
+    var opaqueBounds: (min: SIMD2<Float>, max: SIMD2<Float>) {
+        var minPoint = SIMD2<Float>(1, 1)
+        var maxPoint = SIMD2<Float>(0, 0)
+        for y in 0..<Self.size {
+            for x in 0..<Self.size where alpha[y * Self.size + x] > 128 {
+                let point = SIMD2(Float(x), Float(y)) / Float(Self.size)
+                minPoint = simd_min(minPoint, point)
+                maxPoint = simd_max(maxPoint, point + 1 / Float(Self.size))
+            }
+        }
+        return minPoint.x < maxPoint.x ? (minPoint, maxPoint) : (.zero, SIMD2(1, 1))
     }
 }
 
@@ -54,7 +87,7 @@ enum GooglyEyeDetector {
 
     /// 顔が見つからない素材では、絵の上から3割くらいの高さに目を2つ並べる
     private static func fallbackLayout(for image: UIImage) -> GooglyEyeLayout {
-        let bounds = BubbleMask.cached(for: image).opaqueBounds
+        let bounds = SubjectMask.cached(for: image).opaqueBounds
         let size = bounds.max - bounds.min
         let y = bounds.min.y + size.y * 0.28
         let centerX = (bounds.min.x + bounds.max.x) / 2
