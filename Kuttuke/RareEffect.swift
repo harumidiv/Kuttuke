@@ -2,19 +2,26 @@ import CoreMotion
 import SpriteKit
 import SwiftUI
 
-/// 素材にかけるレアカード風のキラ加工。端末の傾きに合わせて光が動く
+/// 素材にかけるレアカード風の加工。端末の傾きに合わせて光や模様が動く
 enum RareEffect: String, CaseIterable, Identifiable {
-    case holo
-    case glitter
-    case gold
-    /// 縁に沿ってラメの帯をつける。中の絵はそのまま
-    case lameOutline
-    /// 縁がネオン管のように光る
-    case neon
-    /// 水入りシール。傾けると中の気泡が浮いて動く
-    case water
-    /// 中で雪が降り、振ると舞い上がる
-    case snowGlobe
+    /// 水たまりに浮いた油膜のような、うねる虹色
+    case oilSlick
+    /// ボロノイで区切ったステンドグラス。傾けると光の差しこむ位置が変わる
+    case stainedGlass
+    /// 中身が宇宙になる。星は奥と手前の2層で、傾けると奥行きが出る
+    case galaxy
+    /// ヘアライン加工の銀箔。傾けると光沢の縞が走る
+    case silver
+    /// 色数を減らしたドット絵。ドット1つぶんの黒い縁がつく
+    case pixel
+    /// まん中がふくらむ魚眼レンズ。傾けるとふくらむ場所が動く
+    case fisheye
+    /// 筆でなでたように色が流れる油絵
+    case oilPaint
+    /// 布に×の字で糸を刺したクロスステッチ
+    case crossStitch
+    /// 赤外線カメラで撮ったような色。真ん中ほど熱く、熱がゆらゆら動く
+    case thermal
     /// 顔にぎょろ目がつき、傾けたり揺らしたりすると黒目が転がる
     case googlyEyes
 
@@ -22,28 +29,40 @@ enum RareEffect: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .holo: String(localized: "ホロ")
-        case .glitter: String(localized: "キラキラ")
-        case .gold: String(localized: "ゴールド")
-        case .lameOutline: String(localized: "ラメ縁取り")
-        case .neon: String(localized: "ネオン")
-        case .water: String(localized: "水入り")
-        case .snowGlobe: String(localized: "スノードーム")
+        case .oilSlick: String(localized: "オイルスリック")
+        case .stainedGlass: String(localized: "ステンドグラス")
+        case .galaxy: String(localized: "ギャラクシー")
+        case .silver: String(localized: "シルバー")
+        case .pixel: String(localized: "ドット絵")
+        case .fisheye: String(localized: "魚眼")
+        case .oilPaint: String(localized: "油絵")
+        case .crossStitch: String(localized: "クロスステッチ")
+        case .thermal: String(localized: "サーモグラフィ")
         case .googlyEyes: String(localized: "ぎょろ目")
         }
     }
 
-    /// シェーダーに渡す種類の番号（RareEffect.metal の rare::shade / rare::edge の分岐と合わせる）
+    /// シェーダーに渡す種類の番号（RareEffect.metal の rare::shade / sampleEffect の分岐と合わせる）
     var shaderKind: Float {
         switch self {
-        case .holo: 1
-        case .glitter: 2
-        case .gold: 3
-        case .water: 4
-        case .neon: 5
-        case .lameOutline: 6
-        case .snowGlobe: 7
-        case .googlyEyes: 8
+        case .silver: 1
+        case .oilSlick: 2
+        case .galaxy: 3
+        case .stainedGlass: 4
+        case .pixel: 5
+        case .fisheye: 6
+        case .oilPaint: 7
+        case .crossStitch: 8
+        case .thermal: 9
+        case .googlyEyes: 10
+        }
+    }
+
+    /// 周りの色を読む加工か。SwiftUIでは layerEffect が要り、SpriteKitでは種類ごとにシェーダーを分ける
+    var readsNearbyPixels: Bool {
+        switch self {
+        case .stainedGlass, .pixel, .fisheye, .oilPaint, .crossStitch, .thermal: true
+        case .silver, .oilSlick, .galaxy, .googlyEyes: false
         }
     }
 }
@@ -144,14 +163,10 @@ private struct RareEffectModifier: ViewModifier {
         switch effect {
         case .none:
             content
-        case .water?:
-            content.modifier(WaterEffectModifier(image: image))
-        case .snowGlobe?:
-            content.modifier(SnowEffectModifier())
         case .googlyEyes?:
             content.modifier(GooglyEffectModifier(image: image))
-        case .neon?, .lameOutline?:
-            content.modifier(EdgeEffectModifier(effect: effect!))
+        case let effect? where effect.readsNearbyPixels:
+            content.modifier(SampleEffectModifier(effect: effect))
         case let effect?:
             content.modifier(ShineEffectModifier(effect: effect))
         }
@@ -182,42 +197,7 @@ private struct ShineEffectModifier: ViewModifier {
     }
 }
 
-private struct WaterEffectModifier: ViewModifier {
-    let image: UIImage
-    @State private var simulation: BubbleSimulation?
-
-    func body(content: Content) -> some View {
-        TimelineView(.animation) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            let tilt = TiltMotion.shared.tilt(at: time)
-            let shaderTime = Float(time.truncatingRemainder(dividingBy: 600))
-            // 描画のたびに気泡を進める（TimelineViewが毎フレーム呼ぶ）
-            let _ = simulation?.step(rise: TiltMotion.shared.rise(at: time), time: time)
-            let bubbles = simulation?.packed ?? [0, 0, 0]
-            content.visualEffect { content, proxy in
-                content.layerEffect(
-                    ShaderLibrary.waterEffect(
-                        .float2(proxy.size),
-                        .float2(tilt.x, tilt.y),
-                        .float(shaderTime),
-                        .floatArray(bubbles)
-                    ),
-                    // 気泡のレンズと水の揺らぎで、少し離れた位置の色を読む
-                    maxSampleOffset: CGSize(width: 16, height: 16)
-                )
-            }
-        }
-        .onAppear {
-            if simulation == nil {
-                simulation = BubbleSimulation(mask: BubbleMask.cached(for: image))
-            }
-            TiltMotion.shared.start()
-        }
-        .onDisappear { TiltMotion.shared.stop() }
-    }
-}
-
-private struct EdgeEffectModifier: ViewModifier {
+private struct SampleEffectModifier: ViewModifier {
     let effect: RareEffect
 
     func body(content: Content) -> some View {
@@ -228,44 +208,18 @@ private struct EdgeEffectModifier: ViewModifier {
             let shaderTime = Float(time.truncatingRemainder(dividingBy: 600))
             content.visualEffect { content, proxy in
                 content.layerEffect(
-                    ShaderLibrary.edgeEffect(
+                    ShaderLibrary.sampleEffect(
                         .float2(proxy.size),
                         .float2(tilt.x, tilt.y),
                         .float(shaderTime),
                         .float(kind)
                     ),
-                    // 縁を調べるため、短い辺の7%くらい離れた位置まで読む
+                    // 魚眼のレンズやステンドグラスのセルの中心など、短い辺の15%くらい離れた位置まで読む
                     maxSampleOffset: CGSize(
-                        width: min(proxy.size.width, proxy.size.height) * 0.07,
-                        height: min(proxy.size.width, proxy.size.height) * 0.07
+                        width: min(proxy.size.width, proxy.size.height) * 0.15,
+                        height: min(proxy.size.width, proxy.size.height) * 0.15
                     )
                 )
-            }
-        }
-        .onAppear { TiltMotion.shared.start() }
-        .onDisappear { TiltMotion.shared.stop() }
-    }
-}
-
-private struct SnowEffectModifier: ViewModifier {
-    @State private var snow = SnowDrift()
-
-    func body(content: Content) -> some View {
-        TimelineView(.animation) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            let tilt = TiltMotion.shared.tilt(at: time)
-            let shaderTime = Float(time.truncatingRemainder(dividingBy: 600))
-            let _ = snow.step(fall: -TiltMotion.shared.rise(at: time), shake: TiltMotion.shared.shake(at: time), time: time)
-            let drift = snow.drift
-            let agitation = snow.agitation
-            content.visualEffect { content, proxy in
-                content.colorEffect(ShaderLibrary.snowEffect(
-                    .float2(proxy.size),
-                    .float2(tilt.x, tilt.y),
-                    .float(shaderTime),
-                    .float2(drift.x, drift.y),
-                    .float(agitation)
-                ))
             }
         }
         .onAppear { TiltMotion.shared.start() }
@@ -308,15 +262,8 @@ final class RareEffectSpriteShaders {
     func shader(for effect: RareEffect) -> SKShader {
         if let shader = shaders[effect] { return shader }
         let tilt = SKUniform(name: "u_tilt", vectorFloat2: .zero)
-        let kind = SKUniform(name: "u_kind", float: effect.shaderKind)
         let shader: SKShader
         switch effect {
-        case .water:
-            shader = SKShader(source: Self.waterSource, uniforms: [tilt])
-            shader.attributes = Self.bubbleAttributeNames.map { SKAttribute(name: $0, type: .vectorFloat4) }
-        case .snowGlobe:
-            shader = SKShader(source: Self.helpers + Self.snowSource, uniforms: [tilt])
-            shader.attributes = [SKAttribute(name: "a_snow", type: .vectorFloat4)]
         case .googlyEyes:
             shader = SKShader(source: Self.googlySource, uniforms: [tilt])
             shader.attributes = [
@@ -324,10 +271,11 @@ final class RareEffectSpriteShaders {
                 SKAttribute(name: "a_eyeRadius", type: .float),
                 SKAttribute(name: "a_pupils", type: .vectorFloat4)
             ]
-        case .neon, .lameOutline:
-            shader = SKShader(source: Self.helpers + Self.edgeSource, uniforms: [tilt, kind])
-        case .holo, .glitter, .gold:
+        case .silver, .oilSlick, .galaxy:
+            let kind = SKUniform(name: "u_kind", float: effect.shaderKind)
             shader = SKShader(source: Self.helpers + Self.source, uniforms: [tilt, kind])
+        case .stainedGlass, .pixel, .fisheye, .oilPaint, .crossStitch, .thermal:
+            shader = SKShader(source: Self.helpers + Self.sampleSource(for: effect), uniforms: [tilt])
         }
         shaders[effect] = shader
         tiltUniforms.append(tilt)
@@ -340,28 +288,13 @@ final class RareEffectSpriteShaders {
         }
     }
 
-    /// 水入りの気泡の位置をノードごとに渡す属性。1つに気泡2個分（x, y, x, y）を入れる
-    private static let bubbleAttributeNames = ["a_bubbles0", "a_bubbles1"]
-
-    static func applyBubbles(_ positions: [SIMD2<Float>], to node: SKSpriteNode) {
-        for (index, name) in bubbleAttributeNames.enumerated() where index * 2 + 1 < positions.count {
-            let first = positions[index * 2]
-            let second = positions[index * 2 + 1]
-            node.setValue(SKAttributeValue(vectorFloat4: SIMD4(first.x, first.y, second.x, second.y)), forAttribute: name)
-        }
-    }
-
-    static func applySnow(_ snow: SnowDrift, to node: SKSpriteNode) {
-        node.setValue(SKAttributeValue(vectorFloat4: SIMD4(snow.drift.x, snow.drift.y, snow.agitation, 0)), forAttribute: "a_snow")
-    }
-
     static func applyEyes(_ eyes: GooglyEyesSimulation, to node: SKSpriteNode) {
         node.setValue(SKAttributeValue(vectorFloat4: eyes.eyeCenters), forAttribute: "a_eyes")
         node.setValue(SKAttributeValue(float: eyes.radius), forAttribute: "a_eyeRadius")
         node.setValue(SKAttributeValue(vectorFloat4: eyes.pupilOffsets), forAttribute: "a_pupils")
     }
 
-    /// 複数のシェーダーで使う関数（RareEffect.metal の rare::hash / rainbow / star と同じ）
+    /// 複数のシェーダーで使う関数（RareEffect.metal の rare::hash / noise / fbm / star / voronoi などと同じ）
     private static let helpers = """
     float rareHash(vec2 p) {
         p = fract(p * vec2(123.34, 456.21));
@@ -369,8 +302,36 @@ final class RareEffectSpriteShaders {
         return fract(p.x * p.y);
     }
 
-    vec3 rareRainbow(float t) {
-        return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.33, 0.67)));
+    float rareNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(rareHash(i), rareHash(i + vec2(1.0, 0.0)), u.x),
+                   mix(rareHash(i + vec2(0.0, 1.0)), rareHash(i + vec2(1.0, 1.0)), u.x), u.y);
+    }
+
+    float rareFbm(vec2 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 5; i++) {
+            v += a * rareNoise(p);
+            p = p * 2.03 + vec2(17.1, 9.2);
+            a *= 0.5;
+        }
+        return v;
+    }
+
+    float rareLuma(vec3 c) {
+        return dot(c, vec3(0.299, 0.587, 0.114));
+    }
+
+    vec3 rareSaturate(vec3 c, float s) {
+        return mix(vec3(rareLuma(c)), c, s);
+    }
+
+    float rareSweep(vec2 uv, vec2 tilt, float sharpness) {
+        float s = (uv.x + uv.y) * 0.5 - (0.5 + tilt.x * 0.7 + tilt.y * 0.5);
+        return exp(-s * s * sharpness);
     }
 
     float rareStar(vec2 uv, float scale, float density, float seed, vec2 tilt, float time) {
@@ -380,10 +341,34 @@ final class RareEffectSpriteShaders {
         vec2 offset = vec2(rareHash(cell + seed + 7.1), rareHash(cell + seed + 3.7)) - 0.5;
         vec2 p = fract(grid) - 0.5 - offset * 0.5;
         float twinkle = pow(0.5 + 0.5 * sin(h * 50.0 + tilt.x * 9.0 + tilt.y * 7.0 + time * 2.0), 3.0);
-        float core = smoothstep(0.18, 0.0, length(p));
-        float rays = smoothstep(0.035, 0.0, abs(p.x)) * smoothstep(0.45, 0.0, abs(p.y))
-            + smoothstep(0.035, 0.0, abs(p.y)) * smoothstep(0.45, 0.0, abs(p.x));
+        float core = 1.0 - smoothstep(0.0, 0.18, length(p));
+        float rays = (1.0 - smoothstep(0.0, 0.035, abs(p.x))) * (1.0 - smoothstep(0.0, 0.45, abs(p.y)))
+            + (1.0 - smoothstep(0.0, 0.035, abs(p.y))) * (1.0 - smoothstep(0.0, 0.45, abs(p.x)));
         return step(1.0 - density, h) * twinkle * (core + rays);
+    }
+
+    vec4 rareVoronoi(vec2 p) {
+        vec2 n = floor(p);
+        vec2 f = fract(p);
+        float d1 = 8.0;
+        float d2 = 8.0;
+        vec2 center = vec2(0.0);
+        for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+                vec2 g = vec2(float(i), float(j));
+                vec2 o = vec2(rareHash(n + g), rareHash(n + g + 19.7));
+                vec2 r = g + o - f;
+                float d = dot(r, r);
+                if (d < d1) {
+                    d2 = d1;
+                    d1 = d;
+                    center = n + g + o;
+                } else if (d < d2) {
+                    d2 = d;
+                }
+            }
+        }
+        return vec4(sqrt(d1), sqrt(d2), center);
     }
 
     """
@@ -399,85 +384,50 @@ final class RareEffectSpriteShaders {
         vec2 tilt = u_tilt;
         float time = u_time;
 
-        float lum = dot(c, vec3(0.299, 0.587, 0.114));
-        float sweep = (uv.x + uv.y) * 0.5 - (0.5 + tilt.x * 0.7 + tilt.y * 0.5);
-        float band = exp(-sweep * sweep * 60.0);
+        float lum = rareLuma(c);
         vec3 rgb;
         if (u_kind < 1.5) {
-            vec3 rb = rareRainbow((uv.x * 0.8 + uv.y * 1.2) * 1.6 + tilt.x * 1.2 - tilt.y * 0.8);
-            rgb = mix(c, c * 0.7 + rb * 0.45, 0.35) + band * 0.5;
+            float brush = rareNoise(vec2(uv.x * 6.0, uv.y * 420.0)) * 0.6 + rareNoise(vec2(uv.x * 40.0, uv.y * 900.0)) * 0.4;
+            float sheen = 0.5 + 0.5 * sin((uv.y * 1.4 - uv.x * 0.5) * 7.0 + tilt.y * 6.0 + tilt.x * 3.0);
+            vec3 silver = vec3(0.52, 0.55, 0.6) + (lum - 0.5) * 0.9 + (brush - 0.5) * 0.18 + pow(sheen, 4.0) * 0.55;
+            silver += vec3(0.6, 0.75, 1.0) * 0.12 * sheen;
+            rgb = mix(c, silver, 0.72) + rareSweep(uv, tilt, 50.0) * 0.45;
         } else if (u_kind < 2.5) {
-            vec2 fine = uv * 70.0;
-            vec2 fineCell = floor(fine);
-            float hf = rareHash(fineCell);
-            // 粒の位置と大きさをばらつかせ、網目模様に見えないようにする
-            vec2 jitter = (vec2(rareHash(fineCell + 1.3), rareHash(fineCell + 5.9)) - 0.5) * 0.6;
-            float dotSize = 0.32 + 0.25 * rareHash(fineCell + 9.2);
-            float fineTwinkle = pow(0.5 + 0.5 * sin(hf * 80.0 + tilt.x * 14.0 + tilt.y * 11.0 + time * 2.5), 4.0);
-            float fineDot = step(0.05, hf) * smoothstep(dotSize, 0.0, length(fract(fine) - 0.5 - jitter));
-            vec3 fineSpark = vec3(1.0, 0.97, 0.88) * fineDot * fineTwinkle * 1.6;
-            float stars = rareStar(uv, 12.0, 0.85, 0.0, tilt, time) * 2.2
-                + rareStar(uv, 18.0, 0.75, 19.3, tilt, time) * 1.6;
-            rgb = c * (1.0 + band * 0.4) + fineSpark + vec3(1.0, 0.98, 0.92) * stars + band * 0.3;
+            vec2 p = uv * 2.5;
+            vec2 w = vec2(rareFbm(p + time * 0.05), rareFbm(p + 5.2 - time * 0.04));
+            float thickness = rareFbm(p + w * 2.0) * 2.0 + dot(uv - 0.5, tilt) * 2.0 + lum * 0.6;
+            vec3 film = 0.5 + 0.5 * cos(6.28318 * (thickness * 1.6 + vec3(0.0, 0.33, 0.67)));
+            rgb = mix(c, c * 0.35 + film * 0.8, 0.56) + rareSweep(uv, tilt, 40.0) * 0.25;
         } else {
-            vec3 gold = mix(vec3(0.42, 0.26, 0.06), vec3(1.0, 0.88, 0.5), smoothstep(0.05, 0.95, lum));
-            float sheen = 0.5 + 0.5 * sin((uv.x - uv.y) * 8.0 + tilt.x * 4.0 - tilt.y * 3.0);
-            rgb = mix(c, gold * (0.8 + 0.4 * sheen), 0.75) + band * vec3(1.0, 0.95, 0.75) * 0.55;
+            vec2 p = uv - tilt * 0.06;
+            float nebula = rareFbm(p * 3.0 + vec2(time * 0.02, 0.0));
+            float nebula2 = rareFbm(p * 5.0 - vec2(0.0, time * 0.03) + 3.1);
+            vec3 sky = vec3(0.03, 0.02, 0.10)
+                + vec3(0.45, 0.10, 0.55) * smoothstep(0.35, 0.8, nebula)
+                + vec3(0.10, 0.35, 0.75) * pow(smoothstep(0.4, 0.9, nebula2), 1.5);
+            float stars = rareStar(uv - tilt * 0.12, 26.0, 0.35, 3.0, tilt, time) * 1.4
+                + rareStar(uv - tilt * 0.04, 48.0, 0.25, 9.0, tilt, time);
+            sky += vec3(1.0, 0.95, 0.9) * stars;
+            sky *= 0.55 + 0.9 * lum;
+            rgb = mix(c, sky, 0.81);
         }
         vec4 shaded = vec4(clamp(rgb, 0.0, 1.0) * color.a, color.a);
         gl_FragColor = color.a < 0.004 ? color : shaded;
     }
     """
-    // RareEffect.metal の rare::bubble / rare::water と同じ計算。気泡の数と半径は BubbleSimulation.radii と合わせる
-    private static let waterSource = """
-    vec4 rareBubble(vec2 uv, vec2 center, float r) {
-        vec2 d = uv - center;
-        float dist = length(d);
-        float inside = 1.0 - smoothstep(r * 0.92, r, dist);
-        float lens = max(1.0 - (dist * dist) / (r * r), 0.0);
-        vec2 offset = -d * 0.45 * lens * inside;
-        float rim = smoothstep(r * 0.7, r * 0.95, dist) * inside;
-        float spot = (1.0 - smoothstep(0.0, r * 0.28, length(d + vec2(0.38, 0.38) * r))) * inside;
-        float outline = smoothstep(r * 0.95, r * 1.02, dist) * (1.0 - smoothstep(r * 1.02, r * 1.12, dist));
-        return vec4(offset, rim + spot * 1.2, outline);
+
+    /// uv（左上原点）の位置の色を読む式。SpriteKitのテクスチャ座標は左下原点なので上下を反転する
+    private static func sample(_ uv: String) -> String {
+        "texture2D(u_texture, vec2((\(uv)).x, 1.0 - (\(uv)).y))"
     }
 
-    void main() {
-        // SpriteKitの変換でmain内の早期returnが使えないため、透明部分も計算して最後に元の色へ戻す
-        vec4 base = SKDefaultShading();
-        vec2 uv = vec2(v_tex_coord.x, 1.0 - v_tex_coord.y);
-        vec2 tilt = u_tilt;
-        float time = u_time;
-
-        vec4 bubbles = rareBubble(uv, a_bubbles0.xy, 0.085)
-            + rareBubble(uv, a_bubbles0.zw, 0.066)
-            + rareBubble(uv, a_bubbles1.xy, 0.052)
-            + rareBubble(uv, a_bubbles1.zw, 0.042);
-        vec2 wave = vec2(sin(uv.y * 18.0 + time * 1.6 + tilt.x * 3.0), cos(uv.x * 16.0 + time * 1.3 + tilt.y * 3.0)) * 0.004;
-        vec2 sampleUV = uv + wave + bubbles.xy;
-        vec4 original = texture2D(u_texture, v_tex_coord);
-        vec4 moved = texture2D(u_texture, vec2(sampleUV.x, 1.0 - sampleUV.y));
-        // 縁の外の透明な色を拾ったときは元の色を使う
-        vec4 source = moved.a > original.a * 0.5 ? moved : original;
-        vec3 c = source.rgb / max(source.a, 0.004);
-
-        c = mix(c, c * vec3(0.92, 0.98, 1.06) + 0.04, 0.6);
-        float sweep = (uv.x + uv.y) * 0.5 - (0.5 + tilt.x * 0.7 + tilt.y * 0.5);
-        float gloss = exp(-sweep * sweep * 30.0) * 0.22;
-        c = c * (1.0 - bubbles.w * 0.35) + bubbles.z * 0.65 + gloss;
-
-        vec4 shaded = vec4(clamp(c, 0.0, 1.0) * base.a, base.a);
-        gl_FragColor = base.a < 0.004 ? base : shaded;
-    }
-    """
-
-    /// 周囲8方向・半径rの不透明度の最大と最小（RareEffect.metal の rare::ring と同じ）。
+    /// 周囲8方向・半径r（uv）の不透明度の最大と最小（RareEffect.metal の rare::ring と同じ）。
     /// SpriteKitの変換では main 以外の関数から u_texture を読めないため、main の中にそのまま展開する
-    private static func ringCode(_ name: String, radius: Double) -> String {
+    private static func ringCode(_ name: String, center: String, radius: Double) -> String {
         let d = radius * 0.7071
         let offsets = [(radius, 0.0), (-radius, 0.0), (0.0, radius), (0.0, -radius), (d, d), (-d, -d), (d, -d), (-d, d)]
         let samples = offsets.enumerated().map { index, offset in
-            "float \(name)_\(index) = texture2D(u_texture, v_tex_coord + vec2(\(offset.0), \(offset.1))).a;"
+            "float \(name)_\(index) = \(sample("\(center) + vec2(\(offset.0), \(offset.1))")).a;"
         }
         let values = (0..<8).map { "\(name)_\($0)" }
         func fold(_ function: String) -> String {
@@ -486,94 +436,122 @@ final class RareEffectSpriteShaders {
         return (samples + ["vec2 \(name) = vec2(\(fold("max")), \(fold("min")));"]).joined(separator: "\n        ")
     }
 
-    // RareEffect.metal の rare::ring / rare::edge と同じ計算。見た目を変えるときは両方を直す
-    private static let edgeSource = """
-    void main() {
+    /// 周りの色を読む加工の共通の前置き。ドット絵の縁のように元の絵の外側にも描くため、ノードの透明度は別に掛ける
+    private static let samplePrologue = """
         vec4 base = SKDefaultShading();
         vec4 original = texture2D(u_texture, v_tex_coord);
         // アイテムのフェードインなどで薄くなっている分
-        float nodeAlpha = base.a / max(original.a, 0.004);
-        nodeAlpha = original.a < 0.004 ? 1.0 : min(nodeAlpha, 1.0);
-        float a0 = original.a;
+        float nodeAlpha = original.a < 0.004 ? 1.0 : min(base.a / max(original.a, 0.004), 1.0);
         vec2 uv = vec2(v_tex_coord.x, 1.0 - v_tex_coord.y);
         vec2 tilt = u_tilt;
-        float time = u_time;
-    \(ringCode("n1", radius: 0.010))
-    \(ringCode("n2", radius: 0.018))
-    \(ringCode("n3", radius: 0.040))
-    \(ringCode("n4", radius: 0.065))
-        vec3 c = original.rgb / max(a0, 0.004);
+    """
 
-        float maxNear = max(a0, max(n1.x, n2.x));
-        float minNear = min(a0, min(n1.y, n2.y));
-        float band = clamp(maxNear * (1.0 - minNear), 0.0, 1.0);
-        vec4 result;
-        if (u_kind < 5.5) {
-            float core = clamp(max(a0, n1.x) * (1.0 - min(a0, n1.y)), 0.0, 1.0);
-            float tube = clamp(core * 0.6 + band * 0.5, 0.0, 1.0);
-            float glow = (n3.x * 0.55 + n4.x * 0.35) * (1.0 - a0);
-            float hue = 0.5 + 0.5 * sin(time * 0.7 + tilt.x * 2.0);
-            vec3 neon = mix(vec3(1.0, 0.25, 0.75), vec3(0.25, 0.85, 1.0), hue);
-            float flicker = 1.0 - 0.55 * step(0.93, rareHash(vec2(floor(time * 9.0), 3.1)));
-            float emissionAlpha = clamp(max(tube, glow * 0.9) * flicker, 0.0, 1.0);
-            vec3 emission = (neon * (tube * 1.3 + glow) + vec3(1.0) * core * 0.55) * flicker;
-            float alpha = a0 + emissionAlpha * (1.0 - a0);
-            vec3 rgb = c * 0.72 * a0 * (1.0 - emissionAlpha) + emission;
-            result = vec4(clamp(rgb, 0.0, alpha), alpha);
-        } else {
-            float bandAlpha = smoothstep(0.15, 0.6, band);
-            vec3 lameBase = mix(vec3(0.78, 0.66, 0.38), vec3(0.96, 0.94, 0.9),
-                                0.5 + 0.5 * sin((uv.x - uv.y) * 12.0 + tilt.x * 4.0 - tilt.y * 3.0));
-            vec2 fine = uv * 90.0;
-            vec2 cell = floor(fine);
-            float h = rareHash(cell);
-            vec2 jitter = vec2(rareHash(cell + 1.3), rareHash(cell + 5.9)) - 0.5;
-            float dotMask = step(0.2, h) * smoothstep(0.45, 0.0, length(fract(fine) - 0.5 - jitter * 0.5));
-            float twinkle = pow(0.5 + 0.5 * sin(h * 70.0 + tilt.x * 12.0 + tilt.y * 9.0 + time * 2.2), 4.0);
-            vec3 lame = lameBase * 0.85 + vec3(1.0) * dotMask * twinkle * 1.2
-                + vec3(1.0, 0.98, 0.92) * rareStar(uv, 24.0, 0.6, 5.0, tilt, time) * 1.6;
-            float alpha = a0 + bandAlpha * (1.0 - a0);
-            vec3 rgb = c * a0 * (1.0 - bandAlpha) + clamp(lame, 0.0, 1.0) * bandAlpha;
-            result = vec4(clamp(rgb, 0.0, alpha), alpha);
+    // RareEffect.metal の rare::stainedGlass / pixel / fisheye / oilPaint / crossStitch / thermal と同じ計算。
+    // 見た目を変えるときは両方を直す
+    private static func sampleSource(for effect: RareEffect) -> String {
+        let body: String
+        switch effect {
+        case .stainedGlass:
+            body = """
+                float scale = 13.4;
+                vec4 v = rareVoronoi(uv * scale);
+                vec2 cellUV = v.zw / scale;
+                vec4 cell = \(sample("cellUV"));
+                vec3 glass = cell.a > 0.1 ? cell.rgb / cell.a : original.rgb / max(original.a, 0.004);
+                glass = rareSaturate(glass, 1.5) * 1.1;
+                glass *= 0.75 + 0.5 * rareNoise(uv * 6.0 + tilt * 3.0) + rareSweep(uv, tilt, 25.0) * 0.5;
+                float lead = 1.0 - smoothstep(0.03, 0.07, v.y - v.x);
+                \(ringCode("n1", center: "uv", radius: 0.01))
+                lead = max(lead, 1.0 - smoothstep(0.3, 0.9, n1.y));
+                vec3 rgb = clamp(mix(glass, vec3(0.12, 0.11, 0.1), lead), 0.0, 1.0);
+                vec4 result = original.a < 0.004 ? vec4(0.0) : vec4(rgb * original.a, original.a);
+            """
+        case .pixel:
+            body = """
+                float n = 50.0;
+                float px = 1.0 / n;
+                vec2 cell = (floor(uv * n) + 0.5) * px;
+                vec4 s = \(sample("cell"));
+                float on = step(0.5, s.a);
+                float neighbor = max(max(\(sample("cell + vec2(px, 0.0)")).a, \(sample("cell - vec2(px, 0.0)")).a),
+                                     max(\(sample("cell + vec2(0.0, px)")).a, \(sample("cell - vec2(0.0, px)")).a));
+                float outline = (1.0 - on) * step(0.5, neighbor);
+                vec3 c = floor(rareSaturate(s.rgb / max(s.a, 0.004), 1.2) * 5.0 + 0.5) / 5.0;
+                vec2 f = fract(uv * n);
+                c *= (f.x < 0.12 || f.y < 0.12) ? 1.08 : ((f.x > 0.88 || f.y > 0.88) ? 0.88 : 1.0);
+                vec3 rgb = clamp(mix(c, vec3(0.1, 0.1, 0.12), outline), 0.0, 1.0);
+                float alpha = max(on, outline);
+                vec4 result = vec4(rgb * alpha, alpha);
+            """
+        case .fisheye:
+            body = """
+                vec2 center = vec2(0.5) + tilt * 0.25;
+                vec2 p = uv - center;
+                float r = length(p);
+                float radius = 0.45;
+                float t = clamp(r / radius, 0.0001, 1.0);
+                vec2 q = r < radius ? center + p * pow(t, 0.72) : uv;
+                vec4 s = \(sample("q"));
+                vec3 c = s.rgb / max(s.a, 0.004);
+                c += (1.0 - smoothstep(0.0, 0.08, length(uv - center + vec2(0.12, 0.12)))) * 0.21;
+                vec4 result = vec4(clamp(c, 0.0, 1.0) * s.a, s.a);
+            """
+        case .oilPaint:
+            body = """
+                float angle = rareFbm(uv * 4.0) * 6.28;
+                vec2 dir = vec2(cos(angle), sin(angle));
+                vec2 stepUV = dir * 0.0075;
+                vec4 sum = \(sample("uv - stepUV * 3.0")) + \(sample("uv - stepUV * 2.0")) + \(sample("uv - stepUV"))
+                    + original + \(sample("uv + stepUV")) + \(sample("uv + stepUV * 2.0")) + \(sample("uv + stepUV * 3.0"));
+                vec3 c = sum.rgb / max(sum.a, 0.004);
+                c = mix(c, floor(rareSaturate(c, 1.3) * 8.0 + 0.5) / 8.0, 0.5);
+                float stroke = rareNoise(vec2(dot(uv, dir) * 30.0, dot(uv, vec2(-dir.y, dir.x)) * 300.0));
+                c *= 0.85 + 0.3 * stroke;
+                c += rareSweep(uv, tilt, 30.0) * 0.15 * stroke;
+                vec4 result = original.a < 0.004 ? vec4(0.0) : vec4(clamp(c, 0.0, 1.0) * original.a, original.a);
+            """
+        case .crossStitch:
+            body = """
+                float n = 53.0;
+                vec2 cell = (floor(uv * n) + 0.5) / n;
+                vec4 s = \(sample("cell"));
+                float alpha = step(0.5, s.a);
+                vec2 f = fract(uv * n) - 0.5;
+                vec2 holes = fract(uv * n * 4.0);
+                vec3 cloth = vec3(0.95, 0.93, 0.86) * (0.9 + 0.1 * step(0.5, holes.x) * step(0.5, holes.y));
+                float t1 = 1.0 - smoothstep(0.2, 0.3, abs(f.x - f.y));
+                float t2 = 1.0 - smoothstep(0.2, 0.3, abs(f.x + f.y));
+                float inside = step(max(abs(f.x), abs(f.y)), 0.47);
+                float stitch = max(t1, t2) * inside;
+                vec3 yarn = floor(s.rgb / max(s.a, 0.004) * 4.0 + 0.5) / 4.0;
+                yarn *= (t2 > t1 ? 1.0 : 0.82) * (0.85 + 0.15 * sin((t2 > t1 ? f.x - f.y : f.x + f.y) * 60.0));
+                vec3 rgb = clamp(mix(cloth, yarn, stitch), 0.0, 1.0);
+                vec4 result = vec4(rgb * alpha, alpha);
+            """
+        default:
+            body = """
+                vec4 s = original;
+                \(ringCode("n1", center: "uv", radius: 0.04))
+                \(ringCode("n2", center: "uv", radius: 0.08))
+                \(ringCode("n3", center: "uv", radius: 0.12))
+                float depth = (n1.y + n2.y + n3.y) / 3.0;
+                float heat = rareLuma(s.rgb / max(s.a, 0.004)) * 0.55 + depth * 0.5;
+                heat = clamp(heat + (rareFbm(uv * 5.0 + u_time * 0.2) - 0.5) * 0.25, 0.0, 1.0);
+                vec3 cold = vec3(0.05, 0.0, 0.2);
+                vec3 violet = vec3(0.45, 0.0, 0.6);
+                vec3 red = vec3(0.95, 0.1, 0.2);
+                vec3 orange = vec3(1.0, 0.65, 0.0);
+                vec3 white = vec3(1.0, 1.0, 0.8);
+                vec3 c = heat < 0.25 ? mix(cold, violet, heat / 0.25)
+                    : heat < 0.5 ? mix(violet, red, (heat - 0.25) / 0.25)
+                    : heat < 0.75 ? mix(red, orange, (heat - 0.5) / 0.25)
+                    : mix(orange, white, (heat - 0.75) / 0.25);
+                c *= 0.94 + 0.06 * sin(uv.y * 600.0);
+                vec4 result = s.a < 0.004 ? vec4(0.0) : vec4(clamp(c, 0.0, 1.0) * s.a, s.a);
+            """
         }
-        gl_FragColor = result * nodeAlpha;
+        return "void main() {\n" + samplePrologue + "\n" + body + "\n    gl_FragColor = result * nodeAlpha;\n}\n"
     }
-    """
-
-    // RareEffect.metal の rare::flakes / rare::snow と同じ計算。見た目を変えるときは両方を直す
-    private static let snowSource = """
-    float rareFlakes(vec2 uv, vec2 drift, float scale, float speed, float size, float seed, float time, float agitation) {
-        vec2 g = (uv - drift * speed) * scale;
-        vec2 cell = floor(g);
-        float h = rareHash(cell + seed);
-        vec2 jitter = vec2(rareHash(cell + seed + 4.3), rareHash(cell + seed + 8.1)) - 0.5;
-        vec2 p = fract(g) - 0.5 - jitter * 0.3;
-        float wobble = 0.06 + agitation * 0.08;
-        p += vec2(sin(time * 1.7 + h * 20.0), cos(time * 1.3 + h * 15.0)) * wobble;
-        return step(0.4, h) * (1.0 - smoothstep(size * 0.35, size, length(p)));
-    }
-
-    void main() {
-        vec4 color = SKDefaultShading();
-        vec3 c = color.rgb / max(color.a, 0.004);
-        vec2 uv = vec2(v_tex_coord.x, 1.0 - v_tex_coord.y);
-        vec2 tilt = u_tilt;
-        float time = u_time;
-        vec2 drift = a_snow.xy;
-        float agitation = a_snow.z;
-
-        float f = rareFlakes(uv, drift, 6.0, 1.0, 0.2, 0.0, time, agitation)
-            + rareFlakes(uv, drift, 11.0, 0.7, 0.17, 13.7, time, agitation) * 0.8
-            + rareFlakes(uv, drift, 19.0, 0.45, 0.15, 27.1, time, agitation) * 0.6;
-        c = mix(c, c * vec3(0.95, 0.98, 1.05) + 0.03, 0.5);
-        float sweep = (uv.x + uv.y) * 0.5 - (0.5 + tilt.x * 0.7 + tilt.y * 0.5);
-        float gloss = exp(-sweep * sweep * 30.0) * 0.2;
-        vec3 rgb = clamp(mix(c, vec3(1.0), min(f, 1.0) * 0.92) + gloss, 0.0, 1.0);
-
-        vec4 shaded = vec4(rgb * color.a, color.a);
-        gl_FragColor = color.a < 0.004 ? color : shaded;
-    }
-    """
 
     // RareEffect.metal の rare::eye と同じ計算。見た目を変えるときは両方を直す
     private static let googlySource = """

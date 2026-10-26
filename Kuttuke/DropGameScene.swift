@@ -30,10 +30,6 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
     private let rareEffects: [RareEffect?]
     private let rareShaders = RareEffectSpriteShaders()
     private var isUsingTilt = false
-    /// 水入りの素材の形（気泡を絵の内側に収めるため）。水入りでないレベルはnil
-    private let bubbleMasks: [BubbleMask?]
-    private let bubblesKey = "bubbles"
-    private let snowKey = "snow"
     private let googlyKey = "googly"
     private let lastVelocityKey = "lastVelocity"
     /// ぎょろ目の素材（目の位置を探す元の画像）と、見つかった目の位置
@@ -65,9 +61,6 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
 
     init(images: [UIImage], rareEffects: [RareEffect?] = []) {
         self.rareEffects = rareEffects
-        bubbleMasks = images.enumerated().map { index, image in
-            index < rareEffects.count && rareEffects[index] == .water ? BubbleMask.cached(for: image) : nil
-        }
         var googlyImages: [Int: UIImage] = [:]
         for (index, image) in images.enumerated() where index < rareEffects.count && rareEffects[index] == .googlyEyes {
             googlyImages[index] = image
@@ -268,16 +261,6 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         let textureIndex = min(level, textures.count - 1)
         if textureIndex < rareEffects.count, let effect = rareEffects[textureIndex] {
             node.shader = rareShaders.shader(for: effect)
-        }
-        if let mask = bubbleMasks[textureIndex] {
-            let bubbles = BubbleSimulation(mask: mask)
-            node.userData?[bubblesKey] = bubbles
-            RareEffectSpriteShaders.applyBubbles(bubbles.positions, to: node)
-        }
-        if textureIndex < rareEffects.count, rareEffects[textureIndex] == .snowGlobe {
-            let snow = SnowDrift()
-            node.userData?[snowKey] = snow
-            RareEffectSpriteShaders.applySnow(snow, to: node)
         }
         if googlyImages[textureIndex] != nil {
             let eyes = GooglyEyesSimulation()
@@ -619,7 +602,7 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    /// 気泡・雪・ぎょろ目を進める。アイテムは転がって回転するため、回転を差し引いて実際の重力の向きで動かす
+    /// ぎょろ目を進める。アイテムは転がって回転するため、回転を差し引いて実際の重力の向きで動かす
     private func updateMotionEffects(at time: TimeInterval) {
         let dt = CGFloat(min(max(time - (lastMotionTime ?? time), 0), 1.0 / 20))
         lastMotionTime = time
@@ -635,14 +618,6 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
                     -scene.x * sin(angle) + scene.y * cos(angle)
                 )
                 return SIMD2(rotated.x, -rotated.y)
-            }
-            if let bubbles = node.userData?[bubblesKey] as? BubbleSimulation {
-                bubbles.step(rise: local(rise), time: time)
-                RareEffectSpriteShaders.applyBubbles(bubbles.positions, to: node)
-            }
-            if let snow = node.userData?[snowKey] as? SnowDrift {
-                snow.step(fall: local(-rise), shake: local(shake), time: time)
-                RareEffectSpriteShaders.applySnow(snow, to: node)
             }
             if let eyes = node.userData?[googlyKey] as? GooglyEyesSimulation {
                 if eyes.layout == nil, let layout = googlyLayouts[min(level(of: node), textures.count - 1)] {
