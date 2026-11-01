@@ -23,7 +23,10 @@ struct KuttukeApp: App {
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             guard phase == .active else { return }
-            Task { await InterstitialAdManager.shared.start() }
+            Task {
+                await InterstitialAdManager.shared.start()
+                RewardedAdManager.shared.load()
+            }
         }
     }
 }
