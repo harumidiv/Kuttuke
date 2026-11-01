@@ -23,6 +23,15 @@ final class GameViewModel: ObservableObject {
     /// Game Centerのランキングに今回のスコアで載ったときの順位
     @Published private(set) var leaderboardRank: LeaderboardRank?
     private var rankTask: Task<Void, Never>?
+    /// 1ゲームでアイテムチェンジを使える回数。使いすぎるとランキングの公平さが崩れるため絞る
+    static let itemChangeLimitPerGame = 2
+    @Published private(set) var itemChangesLeft = GameViewModel.itemChangeLimitPerGame
+    /// ルーレットを表示中なら、その候補のレベル
+    @Published private(set) var itemRouletteCandidates: [Int]?
+    /// チェンジ用のリワード広告を表示中か
+    @Published private(set) var isWatchingRewardedAd = false
+    /// このゲームでリワード広告を見たか。見てくれた人には終了後のインタースティシャルを出さない
+    private var didWatchRewardedAd = false
 
     private let bestScoreKey: String
     /// このゲーム開始時点のベストスコア。終了時にベストを更新したかの判定に使う
@@ -51,7 +60,7 @@ final class GameViewModel: ObservableObject {
 
     /// ゲーム終了後の操作の前に、ベストスコアを更新していなければインタースティシャル広告を挟む
     func afterInterstitialIfNeeded(_ action: @escaping () -> Void) {
-        guard isGameOver, !didUpdateBestScore else {
+        guard isGameOver, !didUpdateBestScore, !didWatchRewardedAd else {
             action()
             return
         }
@@ -66,14 +75,54 @@ final class GameViewModel: ObservableObject {
         leaderboardRank = nil
         hasDroppedOnce = false
         score = 0
+        itemChangesLeft = Self.itemChangeLimitPerGame
+        itemRouletteCandidates = nil
+        didWatchRewardedAd = false
         isGameOver = false
         isPaused = false
         scene.isPaused = false
         scene.resetGame()
     }
 
+    var canChangeItem: Bool {
+        itemChangesLeft > 0 && !isGameOver && !isPaused && itemRouletteCandidates == nil && !isWatchingRewardedAd
+    }
+
+    /// 盤面を止めてリワード広告を見せ、最後まで見てもらえたらアイテムチェンジのルーレットを出す
+    func openItemRoulette() {
+        guard canChangeItem, RewardedAdManager.shared.isReady else { return }
+        scene.isPaused = true
+        isWatchingRewardedAd = true
+        RewardedAdManager.shared.show { [weak self] didEarnReward in
+            guard let self else { return }
+            self.isWatchingRewardedAd = false
+            guard didEarnReward, !self.isGameOver else {
+                // 途中で閉じたときは何も変えずに再開する
+                self.scene.isPaused = false
+                return
+            }
+            self.didWatchRewardedAd = true
+            // 広告から戻ったときにSKViewが盤面を再開させることがあるため、止め直す
+            self.scene.isPaused = true
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                self.itemRouletteCandidates = self.scene.itemChangeCandidates()
+            }
+        }
+    }
+
+    /// ルーレットで止めたアイテムに差し替えて、ゲームを再開する
+    func finishItemRoulette(with level: Int) {
+        guard itemRouletteCandidates != nil else { return }
+        itemChangesLeft -= 1
+        scene.replaceNextItem(with: level)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+            itemRouletteCandidates = nil
+        }
+        scene.isPaused = false
+    }
+
     func togglePause() {
-        guard !isGameOver else { return }
+        guard !isGameOver, itemRouletteCandidates == nil else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { isPaused.toggle() }
         scene.isPaused = isPaused
     }
@@ -145,6 +194,7 @@ final class GameViewModel: ObservableObject {
 
 struct GameView: View {
     @StateObject private var model: GameViewModel
+    @ObservedObject private var rewardedAds = RewardedAdManager.shared
     @State private var shareImage: Image?
     @State private var isShowingGameCenterSignInAlert = false
     @Environment(\.displayScale) private var displayScale
@@ -194,6 +244,15 @@ struct GameView: View {
             }
 
             if model.isPaused { pauseOverlay }
+            if let candidates = model.itemRouletteCandidates {
+                ItemRouletteView(
+                    candidates: candidates,
+                    image: model.image(for:),
+                    rareEffect: model.rareEffect(for:),
+                    onFinish: model.finishItemRoulette(with:)
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             if model.isGameOver { gameOverOverlay }
         }
         .onDisappear { model.persistBestScore() }
@@ -234,7 +293,38 @@ struct GameView: View {
         HStack(spacing: 10) {
             scoreCell(label: "SCORE", value: "\(model.score)", accent: KuttukeTheme.orange)
             nextQueueCell
+            itemChangeButton
         }
+    }
+
+    private var itemChangeButton: some View {
+        let isAvailable = model.itemChangesLeft > 0 && rewardedAds.isReady
+        return Button(action: model.openItemRoulette) {
+            VStack(spacing: 3) {
+                Image(systemName: "dice.fill")
+                    .font(.system(size: 19, weight: .black))
+                // 広告を見ることが押す前にわかるようにする
+                Label("チェンジ", systemImage: "play.rectangle.fill")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 8, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(isAvailable ? KuttukeTheme.purple : KuttukeTheme.secondaryText.opacity(0.35))
+            .frame(width: 58, height: 58)
+            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                if model.itemChangesLeft > 0 {
+                    Text("\(model.itemChangesLeft)")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 18, height: 18)
+                        .background(KuttukeTheme.pink, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .buttonStyle(BouncyButtonStyle())
+        .disabled(!model.canChangeItem || !rewardedAds.isReady)
+        .accessibilityLabel("広告を見てアイテムチェンジ。残り\(model.itemChangesLeft)回")
     }
 
     private var nextQueueCell: some View {
@@ -662,6 +752,138 @@ private struct RankInBanner: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("ランクイン。\(rank.itemCount)個ランキングで全国\(rank.rank)位、\(rank.totalPlayers)人中")
+    }
+}
+
+/// 次に落ちるアイテムを選び直すルーレット。候補を順に光らせ、ストップを押した瞬間のものに決まる（目押し）
+private struct ItemRouletteView: View {
+    let candidates: [Int]
+    let image: (Int) -> UIImage?
+    let rareEffect: (Int) -> RareEffect?
+    let onFinish: (Int) -> Void
+
+    /// 1コマの長さ。速すぎると狙えず、遅すぎると簡単すぎる
+    private static let stepInterval: Duration = .milliseconds(130)
+    private static let rowWidth: CGFloat = 258
+    private static let rowSpacing: CGFloat = 6
+
+    @State private var index: Int
+    @State private var isStopped = false
+    @State private var landed = false
+    private let tickFeedback = UISelectionFeedbackGenerator()
+
+    init(candidates: [Int], image: @escaping (Int) -> UIImage?, rareEffect: @escaping (Int) -> RareEffect?, onFinish: @escaping (Int) -> Void) {
+        self.candidates = candidates
+        self.image = image
+        self.rareEffect = rareEffect
+        self.onFinish = onFinish
+        _index = State(initialValue: Int.random(in: 0..<max(candidates.count, 1)))
+    }
+
+    private var rowItemSide: CGFloat {
+        let count = CGFloat(max(candidates.count, 1))
+        return min(40, (Self.rowWidth - Self.rowSpacing * (count - 1)) / count)
+    }
+
+    var body: some View {
+        Color.black.opacity(0.32)
+            .ignoresSafeArea()
+            .overlay {
+                VStack(spacing: 14) {
+                    Label("アイテムチェンジ", systemImage: "dice.fill")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .tracking(2)
+                        .foregroundStyle(KuttukeTheme.purple)
+                    Text(isStopped ? "これに決定！" : "タイミングよく止めてね")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(KuttukeTheme.secondaryText)
+
+                    slot
+                    candidateRow
+
+                    Button(action: stop) {
+                        Label("ストップ！", systemImage: "hand.tap.fill")
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(isStopped ? KuttukeTheme.secondaryText.opacity(0.5) : KuttukeTheme.ink, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    }
+                    .buttonStyle(BouncyButtonStyle())
+                    .disabled(isStopped)
+                    .padding(.top, 4)
+                }
+                .padding(26)
+                .frame(maxWidth: 310)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+            }
+            .task { await spin() }
+    }
+
+    private var slot: some View {
+        let level = candidates.isEmpty ? 0 : candidates[index]
+        return ZStack {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(KuttukeTheme.cream)
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(isStopped ? KuttukeTheme.orange : .white, lineWidth: 4)
+            if let image = image(level) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .rareEffect(rareEffect(level), image: image)
+                    .padding(18)
+            }
+        }
+        .frame(width: 150, height: 150)
+        .scaleEffect(landed ? 1.08 : 1)
+        .accessibilityLabel("進化レベル \(level + 1)")
+    }
+
+    private var candidateRow: some View {
+        HStack(spacing: Self.rowSpacing) {
+            ForEach(Array(candidates.enumerated()), id: \.offset) { offset, level in
+                if let image = image(level) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(4)
+                        .frame(width: rowItemSide, height: rowItemSide)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(offset == index ? KuttukeTheme.purple.opacity(0.22) : .white.opacity(0.7))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(offset == index ? KuttukeTheme.purple : .clear, lineWidth: 2)
+                        )
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func spin() async {
+        guard candidates.count > 1 else { return }
+        tickFeedback.prepare()
+        while !isStopped, !Task.isCancelled {
+            try? await Task.sleep(for: Self.stepInterval)
+            guard !isStopped else { break }
+            index = (index + 1) % candidates.count
+            tickFeedback.selectionChanged()
+        }
+    }
+
+    private func stop() {
+        guard !isStopped, !candidates.isEmpty else { return }
+        isStopped = true
+        let level = candidates[index]
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.45)) { landed = true }
+        Task {
+            try? await Task.sleep(for: .milliseconds(750))
+            onFinish(level)
+        }
     }
 }
 

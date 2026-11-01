@@ -233,6 +233,57 @@ final class DropGameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
+    /// アイテムチェンジのルーレットに並べる候補。盤面にあるレベルだけにして、どれで止めても合体を狙えるようにする
+    func itemChangeCandidates() -> [Int] {
+        let maximumSpawnLevel = self.maximumSpawnLevel
+        var levelsOnBoard = Set<Int>()
+        enumerateChildNodes(withName: itemName) { [weak self] node, _ in
+            guard let self else { return }
+            levelsOnBoard.insert(self.level(of: node))
+        }
+        var candidates = levelsOnBoard.filter { $0 <= maximumSpawnLevel }.sorted()
+        if candidates.isEmpty {
+            candidates = Array(0...maximumSpawnLevel)
+        }
+        // 今と同じものに変わっても意味がないため、他の候補があれば外す
+        if let nextLevel, candidates.count > 1 {
+            candidates.removeAll { $0 == nextLevel }
+        }
+        return candidates
+    }
+
+    /// 次に落ちるアイテムのレベル。構えているものがあればそれ、落とした直後ならNEXTの先頭
+    private var nextLevel: Int? {
+        if let currentNode { return level(of: currentNode) }
+        return upcomingLevels.first
+    }
+
+    /// 次に落ちるアイテムを差し替える。構えているものがあればその場で入れ替え、落とした直後ならNEXTの先頭を入れ替える
+    func replaceNextItem(with level: Int) {
+        guard !isGameFinished, !textures.isEmpty else { return }
+        let level = min(max(level, 0), highestLevel)
+        guard let oldNode = currentNode else {
+            fillUpcomingLevels(to: 3)
+            upcomingLevels[0] = level
+            onNextLevels?(Array(upcomingLevels.prefix(3)))
+            return
+        }
+
+        let node = makeItem(level: level, dynamic: false)
+        node.name = previewName
+        node.position = CGPoint(x: clampedX(oldNode.position.x, for: node), y: dropHeight(for: node))
+        oldNode.removeFromParent()
+        activeTouch = nil
+        addChild(node)
+        currentNode = node
+        node.setScale(0.4)
+        let grow = SKAction.scale(to: 1.15, duration: 0.16)
+        grow.timingMode = .easeOut
+        let settle = SKAction.scale(to: 1, duration: 0.12)
+        settle.timingMode = .easeInEaseOut
+        node.run(.sequence([grow, settle]))
+    }
+
     private func fillUpcomingLevels(to count: Int) {
         let maximumSpawnLevel = self.maximumSpawnLevel
         while upcomingLevels.count < count {
