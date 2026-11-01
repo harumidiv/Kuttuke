@@ -2,25 +2,41 @@ import AVFoundation
 import Combine
 import Foundation
 
-enum MergeSoundAudioSession {
-    /// ゲーム中：消音スイッチがオンでも鳴らす。他アプリの音楽は止めずに重ねて鳴らす
+/// 音声セッションの切り替え。`setActive` はシステムの応答待ちで時間がかかることがあり、
+/// メインスレッドで呼ぶと画面が固まるおそれがあるため、専用のキューで順番に実行する
+nonisolated enum MergeSoundAudioSession {
+    private static let queue = DispatchQueue(label: "kuttuke.audio-session", qos: .userInitiated)
+
+    /// ゲーム中：消音スイッチがオンでも鳴らす。他アプリの音楽は止めずに重ねて鳴らす。
+    /// 最初の合体まで間があるため、切り替えの完了は待たない
     static func activateForGame() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setActive(true)
+        queue.async {
+            try? activate(.playback, options: [.mixWithOthers])
+        }
     }
 
-    /// 試聴：設定画面では音を確かめたいので、消音スイッチがオンでも鳴らす
-    static func activateForPreview() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setActive(true)
+    /// 試聴：設定画面では音を確かめたいので、消音スイッチがオンでも鳴らす。
+    /// 切り替え前に鳴らすと消音で鳴らないことがあるため、完了を待ってから再生すること
+    static func activateForPreview() async {
+        try? await perform { try activate(.playback, options: [.mixWithOthers]) }
     }
 
-    static func activateForRecording() throws {
+    static func activateForRecording() async throws {
+        try await perform { try activate(.playAndRecord, options: [.defaultToSpeaker]) }
+    }
+
+    private static func activate(_ category: AVAudioSession.Category, options: AVAudioSession.CategoryOptions) throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setCategory(category, mode: .default, options: options)
         try session.setActive(true)
+    }
+
+    private static func perform(_ work: @escaping @Sendable () throws -> Void) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async {
+                continuation.resume(with: Result { try work() })
+            }
+        }
     }
 }
 
@@ -111,6 +127,7 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
 
     private var recorder: AVAudioRecorder?
     private var previewPlayer: AVAudioPlayer?
+    private var previewTask: Task<Void, Never>?
     private var timer: AnyCancellable?
     private var isDiscarded = false
 
@@ -149,7 +166,7 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
             throw MergeSoundError.microphoneDenied
         }
         stopPreview()
-        try MergeSoundAudioSession.activateForRecording()
+        try await MergeSoundAudioSession.activateForRecording()
 
         let url = Self.makeTemporaryURL(extension: "m4a")
         let settings: [String: Any] = [
@@ -161,7 +178,7 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
         let recorder = try AVAudioRecorder(url: url, settings: settings)
         recorder.delegate = self
         guard recorder.prepareToRecord(), recorder.record(forDuration: Self.maximumRecordingDuration) else {
-            MergeSoundAudioSession.activateForPreview()
+            await MergeSoundAudioSession.activateForPreview()
             throw MergeSoundError.recordingFailed
         }
         self.recorder = recorder
@@ -231,8 +248,15 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
     func preview(_ assetID: UUID) {
         guard let url = url(for: assetID) else { return }
         stopPreview()
-        // 録音直後は録音用のセッションのままだと受話口から小さく鳴る・消音で鳴らないことがあるため、再生用に切り替える
-        MergeSoundAudioSession.activateForPreview()
+        previewTask = Task { [weak self] in
+            // 録音直後は録音用のセッションのままだと受話口から小さく鳴る・消音で鳴らないことがあるため、再生用に切り替えてから鳴らす
+            await MergeSoundAudioSession.activateForPreview()
+            guard let self, !Task.isCancelled else { return }
+            self.startPreviewPlayer(url: url, assetID: assetID)
+        }
+    }
+
+    private func startPreviewPlayer(url: URL, assetID: UUID) {
         guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
         player.prepareToPlay()
         guard player.play() else { return }
@@ -247,6 +271,9 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
     }
 
     func stopPreview() {
+        // 音声セッションの切り替え待ちで、まだ鳴っていない試聴も取り消す
+        previewTask?.cancel()
+        previewTask = nil
         previewPlayer?.stop()
         previewPlayer = nil
         playingAssetID = nil
