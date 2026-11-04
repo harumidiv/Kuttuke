@@ -32,7 +32,10 @@ struct SubjectLibraryView: View {
                 savedSoundURLs[assetID] = library.mergeSoundURL(for: stage, assetID: assetID)
             }
         }
-        _soundDraft = StateObject(wrappedValue: StageSoundDraft(savedURLs: savedSoundURLs))
+        _soundDraft = StateObject(wrappedValue: StageSoundDraft(
+            savedURLs: savedSoundURLs,
+            savedMusicURL: stage.flatMap(library.backgroundMusicURL(for:))
+        ))
     }
 
     var body: some View {
@@ -479,7 +482,7 @@ struct SubjectLibraryView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("高度な詳細設定")
                         .font(.system(size: 15, weight: .black, design: .rounded))
-                    Text("進化音とキラ加工を素材ごとに設定")
+                    Text("BGM・進化音・キラ加工を設定")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(KuttukeTheme.secondaryText)
                 }
@@ -570,7 +573,8 @@ struct SubjectLibraryView: View {
             name: stageName,
             assetIDs: selectedAssetIDs,
             soundChanges: soundDraft.changes,
-            rareEffects: rareEffects
+            rareEffects: rareEffects,
+            backgroundMusicChange: soundDraft.musicChange
         ) != nil else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         dismiss()

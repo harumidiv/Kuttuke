@@ -14,8 +14,8 @@ final class GameViewModel: ObservableObject {
     @Published var score = 0
     @Published var bestScore: Int
     @Published var nextLevels = [0, 0, 0]
-    @Published var isGameOver = false
-    @Published var isPaused = false
+    @Published var isGameOver = false { didSet { updateBackgroundMusic() } }
+    @Published var isPaused = false { didSet { updateBackgroundMusic() } }
     /// 操作説明は1つ目を落とすまで表示する
     @Published private(set) var hasDroppedOnce = false
     /// ゲームオーバー時点の盤面のスクショ（SNS共有用）
@@ -29,7 +29,7 @@ final class GameViewModel: ObservableObject {
     /// ルーレットを表示中なら、その候補のレベル
     @Published private(set) var itemRouletteCandidates: [Int]?
     /// チェンジ用のリワード広告を表示中か
-    @Published private(set) var isWatchingRewardedAd = false
+    @Published private(set) var isWatchingRewardedAd = false { didSet { updateBackgroundMusic() } }
     /// このゲームでリワード広告を見たか。見てくれた人には終了後のインタースティシャルを出さない
     private var didWatchRewardedAd = false
 
@@ -38,10 +38,14 @@ final class GameViewModel: ObservableObject {
     private var bestScoreAtStart: Int
     private let mergeFeedback = UIImpactFeedbackGenerator(style: .soft)
     private let mergeSound: MergeSoundPlayer
+    private let backgroundMusic: BackgroundMusicPlayer
+    /// ゲーム画面が表示されていて、アプリが前面にあるか
+    private var isOnScreen = false { didSet { updateBackgroundMusic() } }
     private let gameOverFeedback = UINotificationFeedbackGenerator()
 
-    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?], rareEffects: [RareEffect?]) {
+    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?], backgroundMusicURL: URL?, rareEffects: [RareEffect?]) {
         self.mergeSound = MergeSoundPlayer(urls: mergeSoundURLs)
+        self.backgroundMusic = BackgroundMusicPlayer(url: backgroundMusicURL)
         let bestScoreKey = "kuttuke.best-score.\(stageID.uuidString)"
         self.images = images
         self.evolutionImages = images.map(SubjectExtractor.trimmedToContent)
@@ -78,6 +82,7 @@ final class GameViewModel: ObservableObject {
         itemChangesLeft = Self.itemChangeLimitPerGame
         itemRouletteCandidates = nil
         didWatchRewardedAd = false
+        backgroundMusic.rewind()
         isGameOver = false
         isPaused = false
         scene.isPaused = false
@@ -132,6 +137,18 @@ final class GameViewModel: ObservableObject {
         isPaused = false
         scene.isPaused = false
         scene.endGame()
+    }
+
+    func setOnScreen(_ isOnScreen: Bool) {
+        self.isOnScreen = isOnScreen
+    }
+
+    private func updateBackgroundMusic() {
+        if isOnScreen && !isGameOver && !isPaused && !isWatchingRewardedAd {
+            backgroundMusic.play()
+        } else {
+            backgroundMusic.pause()
+        }
     }
 
     /// 合体のたびに書き込むと重いため、ゲームの区切りでだけ保存する
@@ -198,6 +215,7 @@ struct GameView: View {
     @State private var shareImage: Image?
     @State private var isShowingGameCenterSignInAlert = false
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.scenePhase) private var scenePhase
     let stageName: String
     let onExit: () -> Void
 
@@ -206,6 +224,7 @@ struct GameView: View {
         stageID: UUID,
         stageName: String,
         mergeSoundURLs: [URL?] = [],
+        backgroundMusicURL: URL? = nil,
         rareEffects: [RareEffect?] = [],
         onExit: @escaping () -> Void
     ) {
@@ -213,6 +232,7 @@ struct GameView: View {
             images: images,
             stageID: stageID,
             mergeSoundURLs: mergeSoundURLs,
+            backgroundMusicURL: backgroundMusicURL,
             rareEffects: rareEffects
         ))
         self.stageName = stageName
@@ -255,7 +275,14 @@ struct GameView: View {
             }
             if model.isGameOver { gameOverOverlay }
         }
-        .onDisappear { model.persistBestScore() }
+        .onAppear { model.setOnScreen(scenePhase == .active) }
+        .onDisappear {
+            model.setOnScreen(false)
+            model.persistBestScore()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            model.setOnScreen(phase == .active)
+        }
         .onChange(of: model.boardSnapshot) { _, snapshot in
             shareImage = snapshot.flatMap(makeShareImage)
         }

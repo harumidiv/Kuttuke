@@ -27,6 +27,8 @@ struct GameStage: Identifiable, Codable, Hashable {
     var mergeSoundFileNames: [UUID: String]?
     /// 素材ごとのキラ加工（`RareEffect` のrawValue）。新しい種類を知らない古いアプリでも読み込めるよう文字列で持つ
     var rareEffectNames: [UUID: String]?
+    /// プレイ中に流す自分で選んだBGMのファイル名。未設定なら標準のBGMを流す。友達への共有には含めない
+    var backgroundMusicFileName: String?
     /// 友達に共有したときのコード（CloudKitのレコード名）。未共有ならnil
     var shareCode: String?
     var sharedAt: Date?
@@ -101,6 +103,12 @@ final class SubjectLibrary: ObservableObject {
         stage.assetIDs
             .filter { asset(withID: $0) != nil }
             .map { mergeSoundURL(for: stage, assetID: $0) }
+    }
+
+    func backgroundMusicURL(for stage: GameStage) -> URL? {
+        guard let fileName = stage.backgroundMusicFileName else { return nil }
+        let url = soundsDirectory.appendingPathComponent(fileName)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
     /// `images(for:)` と同じ並びのキラ加工
@@ -180,7 +188,8 @@ final class SubjectLibrary: ObservableObject {
         name: String,
         assetIDs: [UUID],
         soundChanges: [UUID: MergeSoundChange] = [:],
-        rareEffects: [UUID: RareEffect]? = nil
+        rareEffects: [UUID: RareEffect]? = nil,
+        backgroundMusicChange: MergeSoundChange = .keep
     ) -> UUID? {
         let validIDs = uniqueValidAssetIDs(from: assetIDs)
         guard !validIDs.isEmpty else {
@@ -207,6 +216,23 @@ final class SubjectLibrary: ObservableObject {
             }
         }
 
+        let previousMusic = id.flatMap { self.stage(withID: $0) }?.backgroundMusicFileName
+        var music: String?
+        switch backgroundMusicChange {
+        case .keep:
+            music = previousMusic
+        case .remove:
+            music = nil
+        case .replace(let temporaryURL):
+            guard let storedName = storeMergeSound(from: temporaryURL) else {
+                newlyStoredFileNames.forEach(removeMergeSoundFile)
+                errorMessage = String(localized: "BGMを保存できませんでした。")
+                return nil
+            }
+            newlyStoredFileNames.append(storedName)
+            music = storedName
+        }
+
         // nilなら今の設定のまま。ステージから外した素材の分は残さない
         let effectSource = rareEffects ?? id.flatMap { self.stage(withID: $0) }?.rareEffects ?? [:]
         var effectNames: [UUID: String] = [:]
@@ -225,6 +251,7 @@ final class SubjectLibrary: ObservableObject {
             stages[index].updatedAt = now
             stages[index].mergeSoundFileNames = sounds
             stages[index].rareEffectNames = effectNames
+            stages[index].backgroundMusicFileName = music
             guard saveStages() else {
                 stages = previousStages
                 newlyStoredFileNames.forEach(removeMergeSoundFile)
@@ -233,6 +260,9 @@ final class SubjectLibrary: ObservableObject {
             // 差し替え・削除・素材を外したことで使われなくなった音声を片付ける
             let keptFileNames = Set(sounds.values)
             previousSounds.values.filter { !keptFileNames.contains($0) }.forEach(removeMergeSoundFile)
+            if let previousMusic, previousMusic != music {
+                removeMergeSoundFile(previousMusic)
+            }
             return id
         }
 
@@ -243,7 +273,8 @@ final class SubjectLibrary: ObservableObject {
             createdAt: now,
             updatedAt: now,
             mergeSoundFileNames: sounds,
-            rareEffectNames: effectNames
+            rareEffectNames: effectNames,
+            backgroundMusicFileName: music
         )
         stages.insert(stage, at: 0)
         guard saveStages() else {
@@ -263,6 +294,7 @@ final class SubjectLibrary: ObservableObject {
             return false
         }
         stage.mergeSoundFileNames?.values.forEach(removeMergeSoundFile)
+        stage.backgroundMusicFileName.map(removeMergeSoundFile)
         // 共有中のステージは公開をやめる（受け取り済みの友達の手元には残る）
         if let code = stage.shareCode {
             Task { try? await StageShareService.shared.delete(code: code) }

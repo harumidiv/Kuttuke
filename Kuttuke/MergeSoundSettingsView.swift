@@ -1,14 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 高度な詳細設定：進化の順番に並んだ素材ごとに、その素材へ進化したときの音とキラ加工を設定する
+/// 高度な詳細設定：プレイ中のBGMと、進化の順番に並んだ素材ごとに、その素材へ進化したときの音とキラ加工を設定する
 struct MergeSoundSettingsView: View {
     @ObservedObject var library: SubjectLibrary
     let assetIDs: [UUID]
     @ObservedObject var soundDraft: StageSoundDraft
     @Binding var rareEffects: [UUID: RareEffect]
 
-    @State private var importingAssetID: UUID?
+    /// ファイルアプリで選んだ音声をどこに使うか。`fileImporter` を2つ付けると片方しか動かないため、1つにまとめる
+    @State private var importTarget: StageSoundTarget?
 
     var body: some View {
         ZStack {
@@ -16,6 +17,9 @@ struct MergeSoundSettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    musicCard
+                        .padding(.bottom, 8)
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("素材ごとの設定")
                             .font(.system(size: 17, weight: .black, design: .rounded))
@@ -44,19 +48,125 @@ struct MergeSoundSettingsView: View {
         .navigationBarBackButtonHidden(soundDraft.isRecording)
         .fileImporter(
             isPresented: Binding(
-                get: { importingAssetID != nil },
-                set: { if !$0 { importingAssetID = nil } }
+                get: { importTarget != nil },
+                set: { if !$0 { importTarget = nil } }
             ),
             allowedContentTypes: [.audio]
         ) { result in
-            guard let assetID = importingAssetID, case .success(let url) = result else { return }
+            guard let target = importTarget, case .success(let url) = result else { return }
             do {
-                try soundDraft.importFile(at: url, for: assetID)
+                switch target {
+                case .asset(let assetID): try soundDraft.importFile(at: url, for: assetID)
+                case .music: try soundDraft.importMusic(at: url)
+                }
             } catch {
                 library.errorMessage = error.localizedDescription
             }
         }
         .onDisappear { soundDraft.stopPreview() }
+    }
+
+    /// 進化セット全体のBGM。録音もファイル選択もしなければ標準のBGMが流れる
+    private var musicCard: some View {
+        let isRecordingThis = soundDraft.isRecordingMusic
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    sectionLabel("BGM", systemImage: "music.note")
+                    Text(musicStatusText)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(isRecordingThis ? .red : KuttukeTheme.ink)
+                        .monospacedDigit()
+                }
+
+                Spacer(minLength: 4)
+
+                if !isRecordingThis {
+                    Button {
+                        if soundDraft.isPlayingMusic {
+                            soundDraft.stopPreview()
+                        } else {
+                            soundDraft.preview(.music)
+                        }
+                    } label: {
+                        Image(systemName: soundDraft.isPlayingMusic ? "stop.fill" : "play.fill")
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundStyle(KuttukeTheme.ink)
+                            .frame(width: 40, height: 40)
+                            .background(KuttukeTheme.cream, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(soundDraft.isRecording)
+                    .accessibilityLabel("BGMを試聴")
+
+                    if soundDraft.musicURL != nil {
+                        Button {
+                            withAnimation { soundDraft.removeMusic() }
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.red)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("標準のBGMに戻す")
+                    }
+                }
+            }
+
+            HStack(spacing: 9) {
+                Button {
+                    toggleRecording(for: .music)
+                } label: {
+                    Label(isRecordingThis ? String(localized: "停止") : String(localized: "録音する"), systemImage: isRecordingThis ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(
+                            isRecordingThis ? Color.red : KuttukeTheme.ink,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
+                }
+                .buttonStyle(BouncyButtonStyle())
+                .disabled(soundDraft.isRecording && !isRecordingThis)
+
+                Button {
+                    importTarget = .music
+                } label: {
+                    Label("ファイルから選ぶ", systemImage: "folder.fill")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(KuttukeTheme.ink)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(KuttukeTheme.cream, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(BouncyButtonStyle())
+                .disabled(soundDraft.isRecording)
+            }
+            .opacity(soundDraft.isRecording && !isRecordingThis ? 0.4 : 1)
+
+            Text("プレイ中にくり返し流れます。録音は最大\(Int(StageSoundDraft.maximumMusicRecordingDuration))秒、ファイルは\(Int(StageSoundDraft.maximumMusicDuration / 60))分以内です。BGMは友達への共有には含まれません。")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(KuttukeTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(isRecordingThis ? Color.red : .clear, lineWidth: 2)
+        )
+    }
+
+    private var musicStatusText: String {
+        if soundDraft.isRecordingMusic { return recordingProgressText }
+        if soundDraft.hasUnsavedMusic { return String(localized: "新しいBGM（保存すると反映）") }
+        return soundDraft.musicURL == nil ? String(localized: "標準のBGM") : String(localized: "自分で選んだBGM")
     }
 
     /// 1つの素材の設定をまとめたカード。素材を見ながら音とキラ加工を続けて設定できるようにする
@@ -121,7 +231,7 @@ struct MergeSoundSettingsView: View {
                         if soundDraft.playingAssetID == asset.id {
                             soundDraft.stopPreview()
                         } else {
-                            soundDraft.preview(asset.id)
+                            soundDraft.preview(.asset(asset.id))
                         }
                     } label: {
                         Image(systemName: soundDraft.playingAssetID == asset.id ? "stop.fill" : "play.fill")
@@ -152,7 +262,7 @@ struct MergeSoundSettingsView: View {
             if !isFirstLevel {
                 HStack(spacing: 9) {
                     Button {
-                        toggleRecording(for: asset.id)
+                        toggleRecording(for: .asset(asset.id))
                     } label: {
                         Label(isRecordingThis ? String(localized: "停止") : String(localized: "録音する"), systemImage: isRecordingThis ? "stop.fill" : "mic.fill")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -168,7 +278,7 @@ struct MergeSoundSettingsView: View {
                     .disabled(soundDraft.isRecording && !isRecordingThis)
 
                     Button {
-                        importingAssetID = asset.id
+                        importTarget = .asset(asset.id)
                     } label: {
                         Label("ファイルから選ぶ", systemImage: "folder.fill")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -235,20 +345,24 @@ struct MergeSoundSettingsView: View {
     private func statusText(for assetID: UUID, isFirstLevel: Bool, isRecording: Bool) -> String {
         if isFirstLevel { return String(localized: "最初の姿のため、進化音はありません") }
         if isRecording {
-            return String(format: String(localized: "録音中… %.1f / %.0f秒"), soundDraft.recordingElapsed, StageSoundDraft.maximumRecordingDuration)
+            return recordingProgressText
         }
         if soundDraft.hasUnsavedSound(for: assetID) { return String(localized: "新しい音（保存すると反映）") }
         return soundDraft.url(for: assetID) == nil ? String(localized: "未設定（標準の「ぽよん」が鳴ります）") : String(localized: "設定済み")
     }
 
-    private func toggleRecording(for assetID: UUID) {
-        if soundDraft.recordingAssetID == assetID {
+    private var recordingProgressText: String {
+        String(format: String(localized: "録音中… %.1f / %.0f秒"), soundDraft.recordingElapsed, soundDraft.maximumDurationOfCurrentRecording)
+    }
+
+    private func toggleRecording(for target: StageSoundTarget) {
+        if soundDraft.recordingTarget == target {
             soundDraft.stopRecording()
             return
         }
         Task {
             do {
-                try await soundDraft.startRecording(for: assetID)
+                try await soundDraft.startRecording(for: target)
             } catch {
                 library.errorMessage = error.localizedDescription
             }
