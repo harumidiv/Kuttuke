@@ -15,6 +15,11 @@ nonisolated enum MergeSoundAudioSession {
         }
     }
 
+    /// BGM：鳴らし始める前に切り替えを済ませたいときに使う
+    static func activateForGameAndWait() async {
+        try? await perform { try activate(.playback, options: [.mixWithOthers]) }
+    }
+
     /// 試聴：設定画面では音を確かめたいので、消音スイッチがオンでも鳴らす。
     /// 切り替え前に鳴らすと消音で鳴らないことがあるため、完了を待ってから再生すること
     static func activateForPreview() async {

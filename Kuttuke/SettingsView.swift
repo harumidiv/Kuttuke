@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var library: SubjectLibrary
+    @AppStorage(BackgroundMusicPlayer.isEnabledKey) private var isBackgroundMusicEnabled = true
 
     var body: some View {
         NavigationStack {
@@ -11,6 +12,7 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        soundSettings
                         tutorialLink
                         storageInformation
                     }
@@ -27,6 +29,37 @@ struct SettingsView: View {
                         .fontWeight(.bold)
                 }
             }
+        }
+    }
+
+    private var soundSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("サウンド")
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .tracking(1.2)
+                .foregroundStyle(KuttukeTheme.secondaryText)
+
+            Toggle(isOn: $isBackgroundMusicEnabled) {
+                HStack(spacing: 15) {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 23, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .background(KuttukeTheme.purple, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("BGM")
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                        Text("プレイ中に音楽を流す")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(KuttukeTheme.secondaryText)
+                    }
+                }
+            }
+            .tint(KuttukeTheme.orange)
+            .padding(14)
+            .background(.white, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.black.opacity(0.055)))
         }
     }
 
