@@ -38,13 +38,14 @@ final class GameViewModel: ObservableObject {
     private var bestScoreAtStart: Int
     private let mergeFeedback = UIImpactFeedbackGenerator(style: .soft)
     private let mergeSound: MergeSoundPlayer
-    private let backgroundMusic = BackgroundMusicPlayer()
+    private let backgroundMusic: BackgroundMusicPlayer
     /// ゲーム画面が表示されていて、アプリが前面にあるか
     private var isOnScreen = false { didSet { updateBackgroundMusic() } }
     private let gameOverFeedback = UINotificationFeedbackGenerator()
 
-    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?], rareEffects: [RareEffect?]) {
+    init(images: [UIImage], stageID: UUID, mergeSoundURLs: [URL?], backgroundMusicURL: URL?, rareEffects: [RareEffect?]) {
         self.mergeSound = MergeSoundPlayer(urls: mergeSoundURLs)
+        self.backgroundMusic = BackgroundMusicPlayer(url: backgroundMusicURL)
         let bestScoreKey = "kuttuke.best-score.\(stageID.uuidString)"
         self.images = images
         self.evolutionImages = images.map(SubjectExtractor.trimmedToContent)
@@ -223,6 +224,7 @@ struct GameView: View {
         stageID: UUID,
         stageName: String,
         mergeSoundURLs: [URL?] = [],
+        backgroundMusicURL: URL? = nil,
         rareEffects: [RareEffect?] = [],
         onExit: @escaping () -> Void
     ) {
@@ -230,6 +232,7 @@ struct GameView: View {
             images: images,
             stageID: stageID,
             mergeSoundURLs: mergeSoundURLs,
+            backgroundMusicURL: backgroundMusicURL,
             rareEffects: rareEffects
         ))
         self.stageName = stageName

@@ -20,6 +20,7 @@ struct ContentView: View {
                     stageID: stage.id,
                     stageName: stage.name,
                     mergeSoundURLs: library.mergeSoundURLs(for: stage),
+                    backgroundMusicURL: library.backgroundMusicURL(for: stage),
                     rareEffects: library.rareEffects(for: stage)
                 ) {
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {

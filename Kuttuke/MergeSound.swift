@@ -100,6 +100,7 @@ enum MergeSoundError: LocalizedError {
     case recordingFailed
     case unreadableFile
     case tooLong
+    case musicTooLong
 
     var errorDescription: String? {
         switch self {
@@ -111,24 +112,42 @@ enum MergeSoundError: LocalizedError {
             String(localized: "この音声ファイルは読み込めませんでした。")
         case .tooLong:
             String(localized: "\(Int(StageSoundDraft.maximumFileDuration))秒以内の音声ファイルを選んでください。")
+        case .musicTooLong:
+            String(localized: "BGMには\(Int(StageSoundDraft.maximumMusicDuration / 60))分以内の音声ファイルを選んでください。")
         }
     }
 }
 
-/// ステージ編集中の素材ごとの進化音（録音・ファイル選択・試聴）を扱う。保存されるまでは一時フォルダに置く
+/// 録音・ファイル選択・試聴の対象。素材ごとの進化音か、進化セットのBGM
+enum StageSoundTarget: Equatable {
+    case asset(UUID)
+    case music
+}
+
+/// ステージ編集中の素材ごとの進化音とBGM（録音・ファイル選択・試聴）を扱う。保存されるまでは一時フォルダに置く
 @MainActor
 final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate {
     static let maximumRecordingDuration: TimeInterval = 5
-    static let maximumFileDuration: TimeInterval = 10
+    /// BGMは鼻歌や演奏をくり返し流せるよう、進化音より長く録れるようにする
+    static let maximumMusicRecordingDuration: TimeInterval = 60
+    nonisolated static let maximumFileDuration: TimeInterval = 10
+    /// 大きすぎるファイルで端末の容量を圧迫しないよう、BGMの長さを絞る
+    nonisolated static let maximumMusicDuration: TimeInterval = 10 * 60
 
     /// 保存済みの音（編集前の状態）
     private let savedURLs: [UUID: URL]
     /// 録音・ファイル選択で用意した、まだ保存していない音
     @Published private(set) var pendingURLs: [UUID: URL] = [:]
     @Published private(set) var removedAssetIDs: Set<UUID> = []
-    @Published private(set) var recordingAssetID: UUID?
+    @Published private(set) var recordingTarget: StageSoundTarget?
     @Published private(set) var recordingElapsed: TimeInterval = 0
-    @Published private(set) var playingAssetID: UUID?
+    @Published private(set) var playingTarget: StageSoundTarget?
+
+    /// 保存済みのBGM（編集前の状態）
+    private let savedMusicURL: URL?
+    /// ファイル選択で用意した、まだ保存していないBGM
+    @Published private(set) var pendingMusicURL: URL?
+    @Published private(set) var isMusicRemoved = false
 
     private var recorder: AVAudioRecorder?
     private var previewPlayer: AVAudioPlayer?
@@ -136,11 +155,31 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
     private var timer: AnyCancellable?
     private var isDiscarded = false
 
-    init(savedURLs: [UUID: URL]) {
+    init(savedURLs: [UUID: URL], savedMusicURL: URL? = nil) {
         self.savedURLs = savedURLs
+        self.savedMusicURL = savedMusicURL
     }
 
-    var isRecording: Bool { recordingAssetID != nil }
+    var playingAssetID: UUID? {
+        if case .asset(let id) = playingTarget { return id }
+        return nil
+    }
+
+    var isPlayingMusic: Bool { playingTarget == .music }
+
+    var isRecording: Bool { recordingTarget != nil }
+
+    var recordingAssetID: UUID? {
+        if case .asset(let id) = recordingTarget { return id }
+        return nil
+    }
+
+    var isRecordingMusic: Bool { recordingTarget == .music }
+
+    /// 録音中の対象で録れる最長の長さ
+    var maximumDurationOfCurrentRecording: TimeInterval {
+        isRecordingMusic ? Self.maximumMusicRecordingDuration : Self.maximumRecordingDuration
+    }
 
     /// その素材に現在設定されている音
     func url(for assetID: UUID) -> URL? {
@@ -163,9 +202,60 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
         return changes
     }
 
+    // MARK: BGM
+
+    /// 進化セットに現在設定されている自分のBGM。nilなら標準のBGM
+    var musicURL: URL? {
+        if let pendingMusicURL { return pendingMusicURL }
+        return isMusicRemoved ? nil : savedMusicURL
+    }
+
+    var hasUnsavedMusic: Bool { pendingMusicURL != nil }
+
+    var musicChange: MergeSoundChange {
+        if let pendingMusicURL { return .replace(pendingMusicURL) }
+        return isMusicRemoved ? .remove : .keep
+    }
+
+    /// ファイルアプリで選んだ音声を一時フォルダにコピーしてBGMにする
+    func importMusic(at url: URL) throws {
+        let isScoped = url.startAccessingSecurityScopedResource()
+        defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
+
+        guard let player = try? AVAudioPlayer(contentsOf: url) else {
+            throw MergeSoundError.unreadableFile
+        }
+        guard player.duration <= Self.maximumMusicDuration else {
+            throw MergeSoundError.musicTooLong
+        }
+        let destination = Self.makeTemporaryURL(extension: url.pathExtension)
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+        } catch {
+            throw MergeSoundError.unreadableFile
+        }
+        setPendingMusic(destination)
+        preview(.music)
+    }
+
+    /// 自分のBGMをやめて標準のBGMに戻す
+    func removeMusic() {
+        if isPlayingMusic { stopPreview() }
+        setPendingMusic(nil)
+        isMusicRemoved = true
+    }
+
+    private func setPendingMusic(_ url: URL?) {
+        if let old = pendingMusicURL {
+            try? FileManager.default.removeItem(at: old)
+        }
+        pendingMusicURL = url
+        if url != nil { isMusicRemoved = false }
+    }
+
     // MARK: 録音
 
-    func startRecording(for assetID: UUID) async throws {
+    func startRecording(for target: StageSoundTarget) async throws {
         guard !isRecording else { return }
         guard await AVAudioApplication.requestRecordPermission() else {
             throw MergeSoundError.microphoneDenied
@@ -182,12 +272,13 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
         ]
         let recorder = try AVAudioRecorder(url: url, settings: settings)
         recorder.delegate = self
-        guard recorder.prepareToRecord(), recorder.record(forDuration: Self.maximumRecordingDuration) else {
+        let maximumDuration = target == .music ? Self.maximumMusicRecordingDuration : Self.maximumRecordingDuration
+        guard recorder.prepareToRecord(), recorder.record(forDuration: maximumDuration) else {
             await MergeSoundAudioSession.activateForPreview()
             throw MergeSoundError.recordingFailed
         }
         self.recorder = recorder
-        recordingAssetID = assetID
+        recordingTarget = target
         recordingElapsed = 0
         timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect().sink { [weak self] _ in
             guard let self, let recorder = self.recorder else { return }
@@ -207,16 +298,19 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
     }
 
     private func finishRecording(url: URL, succeeded: Bool) {
-        let assetID = recordingAssetID
+        let target = recordingTarget
         timer = nil
         recorder = nil
-        recordingAssetID = nil
-        guard succeeded, !isDiscarded, let assetID else {
+        recordingTarget = nil
+        guard succeeded, !isDiscarded, let target else {
             try? FileManager.default.removeItem(at: url)
             return
         }
-        setPending(url, for: assetID)
-        preview(assetID)
+        switch target {
+        case .asset(let assetID): setPending(url, for: assetID)
+        case .music: setPendingMusic(url)
+        }
+        preview(target)
     }
 
     // MARK: ファイル選択
@@ -239,7 +333,7 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
             throw MergeSoundError.unreadableFile
         }
         setPending(destination, for: assetID)
-        preview(assetID)
+        preview(.asset(assetID))
     }
 
     func remove(for assetID: UUID) {
@@ -250,28 +344,33 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
 
     // MARK: 試聴
 
-    func preview(_ assetID: UUID) {
-        guard let url = url(for: assetID) else { return }
+    func preview(_ target: StageSoundTarget) {
+        let url: URL? = switch target {
+        case .asset(let assetID): url(for: assetID)
+        // 自分のBGMを選んでいなければ標準のBGMを試聴する
+        case .music: musicURL ?? BackgroundMusicPlayer.defaultURL
+        }
+        guard let url else { return }
         stopPreview()
         previewTask = Task { [weak self] in
             // 録音直後は録音用のセッションのままだと受話口から小さく鳴る・消音で鳴らないことがあるため、再生用に切り替えてから鳴らす
             await MergeSoundAudioSession.activateForPreview()
             guard let self, !Task.isCancelled else { return }
-            self.startPreviewPlayer(url: url, assetID: assetID)
+            self.startPreviewPlayer(url: url, target: target)
         }
     }
 
-    private func startPreviewPlayer(url: URL, assetID: UUID) {
+    private func startPreviewPlayer(url: URL, target: StageSoundTarget) {
         guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
         player.prepareToPlay()
         guard player.play() else { return }
         previewPlayer = player
-        playingAssetID = assetID
+        playingTarget = target
         let duration = player.duration
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(duration + 0.1))
             guard let self, self.previewPlayer === player else { return }
-            self.playingAssetID = nil
+            self.playingTarget = nil
         }
     }
 
@@ -281,7 +380,7 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
         previewTask = nil
         previewPlayer?.stop()
         previewPlayer = nil
-        playingAssetID = nil
+        playingTarget = nil
     }
 
     /// 画面を閉じるときに一時ファイルを片付ける（保存時は本保存先へコピー済み）
@@ -293,6 +392,7 @@ final class StageSoundDraft: NSObject, ObservableObject, AVAudioRecorderDelegate
             try? FileManager.default.removeItem(at: url)
         }
         pendingURLs = [:]
+        setPendingMusic(nil)
     }
 
     private func setPending(_ url: URL?, for assetID: UUID) {

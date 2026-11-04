@@ -10,15 +10,19 @@ final class BackgroundMusicPlayer {
         UserDefaults.standard.object(forKey: isEnabledKey) as? Bool ?? true
     }
 
-    private static let url = Bundle.main.url(forResource: "kuttuke_bgm_pop", withExtension: "m4a")
+    /// 進化セットでBGMを選んでいないときに流す標準のBGM
+    static let defaultURL = Bundle.main.url(forResource: "kuttuke_bgm_pop", withExtension: "m4a")
     /// 合体音が聞こえるよう控えめにする
     private static let volume: Float = 0.4
 
     private let player: AVAudioPlayer?
     private var playTask: Task<Void, Never>?
 
-    init() {
-        player = Self.url.flatMap { try? AVAudioPlayer(contentsOf: $0) }
+    /// - Parameter url: 進化セットで選んだBGM。nilや読み込めないときは標準のBGMを流す
+    init(url: URL?) {
+        player = [url, Self.defaultURL].lazy
+            .compactMap { $0.flatMap { try? AVAudioPlayer(contentsOf: $0) } }
+            .first
         player?.numberOfLoops = -1
         player?.volume = Self.volume
         player?.prepareToPlay()
