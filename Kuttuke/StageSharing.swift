@@ -1,4 +1,5 @@
 import CloudKit
+import CoreImage.CIFilterBuiltins
 import Foundation
 import UIKit
 
@@ -35,6 +36,17 @@ enum StageShareCode {
 
     static func url(for code: String) -> URL {
         URL(string: "kuttuke://stage/\(code)")!
+    }
+
+    /// 共有リンクを入れたQRコード。標準カメラで読み取るとアプリが開いて受け取り画面になる
+    static func qrImage(for code: String) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url(for: code).absoluteString.utf8)
+        filter.correctionLevel = "M"
+        // 1モジュール1ピクセルで出力されるので、拡大してもぼやけないよう整数倍に引き伸ばしておく
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+              let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 
     /// `kuttuke://stage/ABCDEFGH` からコードを取り出す
