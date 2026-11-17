@@ -139,6 +139,24 @@ struct StageShareView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                     .textSelection(.enabled)
+
+                if let qrImage = StageShareCode.qrImage(for: code) {
+                    Image(uiImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 170, height: 170)
+                        .padding(12)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(.top, 10)
+                        .accessibilityLabel(Text("共有コードのQRコード"))
+                    Text("友達のiPhoneのカメラで読み取ると、そのまま受け取れます。")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(KuttukeTheme.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
