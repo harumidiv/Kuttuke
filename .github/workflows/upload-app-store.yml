@@ -29,7 +29,8 @@ jobs:
         run: |
           xcodebuild archive \
             -project Kuttuke.xcodeproj \
-            -target Kuttuke \
+            -scheme Kuttuke \
+            -destination 'generic/platform=iOS' \
             -configuration Release \
             -archivePath "$RUNNER_TEMP/Kuttuke.xcarchive" \
             -allowProvisioningUpdates \
