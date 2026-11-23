@@ -23,10 +23,12 @@ final class GameCenterManager: ObservableObject {
 
     private init() {}
 
-    /// App Store Connectで作成するランキングのID（例：kuttuke.items6）
+    /// App Store Connectで作成するランキングのID（例：kuttuke.items6.v2）
+    /// 旧ID（kuttuke.items6等）はスコア順序が「小さい順」で作られてしまったため、
+    /// 「大きい順」で作り直した v2 のIDを使う。旧ランキングは ASC 側に残るが参照しない。
     static func leaderboardID(itemCount: Int) -> String? {
         guard rankedItemCounts.contains(itemCount) else { return nil }
-        return "kuttuke.items\(itemCount)"
+        return "kuttuke.items\(itemCount).v2"
     }
 
     /// 起動時に一度だけ呼ぶ。未サインインならGame Centerのサインイン画面を表示する
