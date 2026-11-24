@@ -1,0 +1,22 @@
+name: Cleanup Certificates
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_delete:
+        description: "ONにすると対象の証明書を実際に失効します（OFFは一覧表示のみ）"
+        type: boolean
+        default: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: List or revoke certificates created by CI
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          DELETE_MODE: ${{ inputs.confirm_delete }}
+        run: python3 ci/cleanup_certs.py
