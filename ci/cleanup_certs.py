@@ -47,6 +47,10 @@ def der_to_raw(der: bytes, size: int = 32) -> bytes:
     return r + s
 
 
+def norm_serial(s: str) -> str:
+    return format(int(str(s).replace(":", "").strip(), 16), "X")
+
+
 def make_jwt(key_id: str, issuer_id: str, key_path: str) -> str:
     now = int(time.time())
     header = {"alg": "ES256", "kid": key_id, "typ": "JWT"}
@@ -106,12 +110,24 @@ def main() -> None:
         if not url:
             break
 
+    serials_file = None
+    if "--serials-file" in sys.argv:
+        serials_file = sys.argv[sys.argv.index("--serials-file") + 1]
+    wanted = set()
+    if serials_file:
+        with open(serials_file) as f:
+            wanted = {norm_serial(line) for line in f if line.strip()}
+        print(f"Serials-file mode: {serials_file} ({len(wanted)} serial(s))")
+
     print(f"Total certificates: {len(certs)}")
     targets = []
     for c in certs:
         a = c.get("attributes", {})
         expiry = a.get("expirationDate", "")
-        hit = expiry.startswith(TARGET_EXPIRY_PREFIXES)
+        if serials_file:
+            hit = norm_serial(a.get("serialNumber", "0")) in wanted
+        else:
+            hit = expiry.startswith(TARGET_EXPIRY_PREFIXES)
         if hit:
             targets.append(c)
         print(
@@ -120,10 +136,13 @@ def main() -> None:
             + ("  <-- TARGET" if hit else "")
         )
 
-    print(f"\nTargets (expiry {', '.join(TARGET_EXPIRY_PREFIXES)}): {len(targets)}")
-    if not delete_mode:
-        print("List-only mode. Nothing was deleted.")
-        return
+    if serials_file:
+        print(f"\nTargets (serials recorded in this run): {len(targets)}")
+    else:
+        print(f"\nTargets (expiry {', '.join(TARGET_EXPIRY_PREFIXES)}): {len(targets)}")
+        if not delete_mode:
+            print("List-only mode. Nothing was deleted.")
+            return
     if not targets:
         print("No targets to delete.")
         return
