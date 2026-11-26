@@ -287,7 +287,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Kuttuke.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = 24BSY9Z4H5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -295,6 +295,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = KUTTUKE;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "ゲームのコマに使う写真を撮るためにカメラを使用します。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ステージで進化したときに鳴らす音を録音するために使用します。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "シェア用のスコア画像を写真に保存するために使用します。";
 				INFOPLIST_KEY_NSUserTrackingUsageDescription = "あなたに合った広告を表示するために使用します。";
@@ -308,7 +309,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = harumidiv.Kuttuke;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -328,7 +329,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Kuttuke.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = 24BSY9Z4H5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -336,6 +337,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = KUTTUKE;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "ゲームのコマに使う写真を撮るためにカメラを使用します。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ステージで進化したときに鳴らす音を録音するために使用します。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "シェア用のスコア画像を写真に保存するために使用します。";
 				INFOPLIST_KEY_NSUserTrackingUsageDescription = "あなたに合った広告を表示するために使用します。";
@@ -349,7 +351,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = harumidiv.Kuttuke;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

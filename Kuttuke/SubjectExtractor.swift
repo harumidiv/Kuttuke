@@ -152,7 +152,7 @@ enum SubjectExtractor {
     }
 }
 
-private extension UIImage {
+extension UIImage {
     nonisolated func normalizedOrientation() -> UIImage {
         guard imageOrientation != .up else { return self }
         let format = UIGraphicsImageRendererFormat()
