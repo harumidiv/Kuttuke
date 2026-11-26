@@ -1,6 +1,8 @@
+import AVFoundation
 import ImageIO
 import PhotosUI
 import SwiftUI
+import UIKit
 
 struct SubjectLibraryView: View {
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +13,9 @@ struct SubjectLibraryView: View {
     @State private var selectedAssetIDs: [UUID]
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var photoBatch: LiftPhotoBatch?
+    @State private var isShowingCamera = false
+    @State private var isShowingCameraSettingsAlert = false
+    @State private var cameraResult: Result<UIImage, SubjectProcessingError>?
     @State private var isLoadingPhoto = false
     @State private var loadingPhotoProgress = ""
     @State private var pendingLoadFailureCount = 0
@@ -81,6 +86,15 @@ struct SubjectLibraryView: View {
             } message: {
                 Text(library.errorMessage ?? "")
             }
+            .alert("操作できませんでした", isPresented: $isShowingCameraSettingsAlert) {
+                Button("設定を開く") {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("カメラを使うには、設定アプリでKUTTUKEのカメラへのアクセスを許可してください。")
+            }
             .alert(
                 "この切り抜きを削除しますか？",
                 isPresented: Binding(
@@ -112,6 +126,13 @@ struct SubjectLibraryView: View {
         }
         .interactiveDismissDisabled(library.isProcessing || isLoadingPhoto)
         .onDisappear { soundDraft.discardTemporaryFiles() }
+        .fullScreenCover(isPresented: $isShowingCamera, onDismiss: handleCameraDismiss) {
+            SubjectCameraPicker { result in
+                cameraResult = result
+                isShowingCamera = false
+            }
+            .ignoresSafeArea()
+        }
         .fullScreenCover(item: $photoBatch, onDismiss: handleBatchDismiss) { batch in
             SubjectLiftBatchEditorView(
                 images: batch.images,
@@ -386,24 +407,20 @@ struct SubjectLibraryView: View {
             ) {
                 actionLabel(icon: "hand.draw.fill", title: "写真を複数選んで切り抜く", filled: true)
             }
-            .disabled(remainingStageSlots == 0 || isLoadingPhoto)
-            .opacity(remainingStageSlots == 0 ? 0.35 : 1)
             .onChange(of: photoItems) { _, items in
                 guard !items.isEmpty else { return }
                 Task { await openPhotos(items) }
             }
 
             Button {
-                Task {
-                    if let assetID = await library.importPastedImage() {
-                        addToStage(assetID)
-                    }
-                }
+                Task { await openCamera() }
             } label: {
-                actionLabel(icon: "doc.on.clipboard", title: "コピーした切り抜きを追加", filled: false)
+                actionLabel(icon: "camera.fill", title: "カメラで撮って切り抜く", filled: false)
             }
             .buttonStyle(BouncyButtonStyle())
         }
+        .disabled(remainingStageSlots == 0 || isLoadingPhoto || library.isProcessing)
+        .opacity(remainingStageSlots == 0 ? 0.35 : 1)
     }
 
     private func actionLabel(icon: String, title: LocalizedStringKey, filled: Bool) -> some View {
@@ -584,6 +601,46 @@ struct SubjectLibraryView: View {
         max(0, SubjectLibrary.maximumStageItems - selectedAssetIDs.count)
     }
 
+    private func openCamera() async {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            library.errorMessage = String(localized: "この端末ではカメラを使用できません。")
+            return
+        }
+
+        let hasAccess: Bool
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            hasAccess = true
+        case .notDetermined:
+            hasAccess = await AVCaptureDevice.requestAccess(for: .video)
+        case .denied:
+            hasAccess = false
+        case .restricted:
+            library.errorMessage = String(localized: "この端末ではカメラを使用できません。")
+            return
+        @unknown default:
+            return
+        }
+
+        guard hasAccess else {
+            isShowingCameraSettingsAlert = true
+            return
+        }
+        isShowingCamera = true
+    }
+
+    private func handleCameraDismiss() {
+        guard let result = cameraResult else { return }
+        cameraResult = nil
+
+        switch result {
+        case .success(let image):
+            photoBatch = LiftPhotoBatch(images: [LiftPhotoPreparer.prepare(capturedImage: image)])
+        case .failure(let error):
+            library.errorMessage = error.localizedDescription
+        }
+    }
+
     private func openPhotos(_ items: [PhotosPickerItem]) async {
         guard !isLoadingPhoto else { return }
         isLoadingPhoto = true
@@ -638,8 +695,52 @@ private struct LiftPhotoBatch: Identifiable {
     let images: [UIImage]
 }
 
+private struct SubjectCameraPicker: UIViewControllerRepresentable {
+    let onFinish: (Result<UIImage, SubjectProcessingError>?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onFinish: onFinish)
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (Result<UIImage, SubjectProcessingError>?) -> Void
+
+        init(onFinish: @escaping (Result<UIImage, SubjectProcessingError>?) -> Void) {
+            self.onFinish = onFinish
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            guard let image = info[.originalImage] as? UIImage else {
+                onFinish(.failure(.unreadableImage))
+                return
+            }
+            onFinish(.success(image))
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onFinish(nil)
+        }
+    }
+}
+
 private enum LiftPhotoPreparer {
     nonisolated static let analysisMaxPixelSize = 1600
+
+    static func prepare(capturedImage image: UIImage) -> UIImage {
+        image.downsampled(maxDimension: CGFloat(analysisMaxPixelSize)).normalizedOrientation()
+    }
 
     nonisolated static func prepare(data: Data) throws -> UIImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {

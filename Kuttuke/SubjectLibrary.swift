@@ -150,17 +150,6 @@ final class SubjectLibrary: ObservableObject {
     }
 
     @discardableResult
-    func importPastedImage() async -> UUID? {
-        guard let image = UIPasteboard.general.image,
-              let data = image.pngData() else {
-            errorMessage = String(localized: "コピーされた画像が見つかりません。写真アプリで被写体を長押しして「コピー」してから、もう一度お試しください。")
-            return nil
-        }
-
-        return await addLiftedSubjectData(data)
-    }
-
-    @discardableResult
     func addLiftedSubject(_ image: UIImage) async -> UUID? {
         guard let data = image.pngData() else {
             errorMessage = SubjectProcessingError.renderFailed.localizedDescription

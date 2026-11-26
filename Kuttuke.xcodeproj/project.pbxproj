@@ -295,6 +295,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = KUTTUKE;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "ゲームのコマに使う写真を撮るためにカメラを使用します。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ステージで進化したときに鳴らす音を録音するために使用します。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "シェア用のスコア画像を写真に保存するために使用します。";
 				INFOPLIST_KEY_NSUserTrackingUsageDescription = "あなたに合った広告を表示するために使用します。";
@@ -336,6 +337,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = KUTTUKE;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "ゲームのコマに使う写真を撮るためにカメラを使用します。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ステージで進化したときに鳴らす音を録音するために使用します。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "シェア用のスコア画像を写真に保存するために使用します。";
 				INFOPLIST_KEY_NSUserTrackingUsageDescription = "あなたに合った広告を表示するために使用します。";
